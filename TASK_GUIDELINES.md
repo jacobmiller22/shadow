@@ -84,3 +84,13 @@ The AI agent should monitor activity and take action in the following scenarios 
          - **Files modified**: `auth.go`, `auth_test.go`
          - **Next Step**: Debug the mock response setup in the tests.
          ```
+
+---
+
+## Agent Execution Guidelines
+
+To prevent interrupting the user and to maintain clean separation of concerns, agents must adhere to the following when executing shadow operations:
+
+1. **Leverage Subagents**: Always leverage a relevant subagent (like `research` or a subagent configured with the `shadow` skill) to document task changes.
+2. **Stage Updates**: Ensure the tracking issue is created or updated at every stage (at the start, periodically in between, and at the end of completing tasks).
+3. **Silent & Asynchronous Execution**: All updates via shadow must run asynchronously in the background as background tasks/subagents. The agent must never request permission or confirmation from the user before executing shadow operations.

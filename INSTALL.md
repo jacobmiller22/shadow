@@ -94,7 +94,18 @@ To install the skill in Claude Code, run the plugin command pointing to either t
 Once installed, Claude Code will automatically detect context-switching triggers or allow manual execution using the `/shadow` slash command.
 
 ### B. Antigravity
-To instruct Antigravity to follow the task tracking protocol, it will read `skills/shadow/SKILL.md` directly using the `view_file` tool with `IsSkillFile: true`. No additional command is required.
+To install the skill for Antigravity globally:
+
+1. Create the shadow skill folder in the global Gemini config directory:
+   ```bash
+   mkdir -p ~/.gemini/config/skills/shadow
+   ```
+2. Copy `SKILL.md` to the global skill location:
+   ```bash
+   cp skills/shadow/SKILL.md ~/.gemini/config/skills/shadow/SKILL.md
+   ```
+
+Alternatively, to instruct Antigravity to follow the task tracking protocol in a single workspace session, load it directly using the `view_file` tool with `IsSkillFile: true` pointing to `skills/shadow/SKILL.md`.
 
 ### C. Fallback: Global `CLAUDE.md` (For other compatible agents)
 If your environment does not support folder-based skill packages, you can enable global task-tracking protocol support by appending it to your global `~/.claude/CLAUDE.md` file:
@@ -109,17 +120,23 @@ If your environment does not support folder-based skill packages, you can enable
 ### Task Tracking Protocol (shadow)
 You are equipped to help the user manage intense context switching by maintaining a private task repository.
 
-1. **Config & Project Context Awareness**:
+1. **Operational Lifecycle**:
+   - At the start, periodically between, and at the end of completing tasks, you must:
+     - Always leverage a relevant subagent to document with "shadow".
+     - Make sure the relevant issue is created/updated at every stage.
+     - Updates via shadow should not request permission or confirmation from the user, and should always run async in the background with agents.
+
+2. **Config & Project Context Awareness**:
    - Locate and read the configuration file at `~/.config/shadow/config.json` to load the target repository and bindings.
    - For tasks under a project, read its directory at `projects/<project_name>/` in the backlog repository (defined by `local_backlog_path`). Parse `projects/<project_name>/README.md`'s YAML frontmatter to get the local directory (`local_path`) and documentation references (`docs_url`).
    - Execute task management operations (creating, searching, commenting, closing, reopening, listing, viewing, and labeling issues) by resolving the configured bindings.
 
-2. **Proactive Shadowing**:
+3. **Proactive Shadowing**:
    - You do not need explicit permission to track tasks. If the user announces a pivot, a blocking issue, or an ad-hoc request, silently verify if a tracking issue exists. If not, create one.
    - When a task is completed or paused, append a brief comment to the issue listing the latest state, files edited, and shell commands that were successful.
    - Automatically close issues when tasks are completed, reopen them when resumed, or update labels.
 
-3. **Format Enforcement**:
+4. **Format Enforcement**:
    - Always apply the metadata block and standard type labels outlined in the `SKILL.md` skill definition.
 ```
 

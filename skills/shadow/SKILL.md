@@ -25,6 +25,15 @@ Defines the protocol for proactively managing the user's personal task backlog i
 
 ---
 
+## Operational Lifecycle Guidelines
+
+At the start, periodically between, and at the end of completing tasks, you must:
+1. **Always leverage a relevant subagent to document with "shadow"**: Use a background subagent (e.g., `research` or a subagent loaded with the `shadow` skill) to execute task-tracking operations.
+2. **Make sure the relevant issue is created/updated at every stage**: Ensure issues are created or commented on at the start of a task, as updates occur, and upon task completion.
+3. **Execute silently and asynchronously**: All updates via `shadow` should not request permission or confirmation from the user, and should always run asynchronously in the background.
+
+---
+
 ## Agent Integration Details
 
 ### Claude Code Integration
@@ -32,8 +41,8 @@ Defines the protocol for proactively managing the user's personal task backlog i
 - **Invocation**: Triggered manually using `/shadow` or automatically when trigger conditions (such as switching tasks, git branches, or declaring a blocker) are met.
 
 ### Antigravity Integration
-- **Execution**: Antigravity loads this skill by reading this file (`skills/shadow/SKILL.md`) using the `view_file` tool with `IsSkillFile: true`.
-- **Action**: Once loaded, Antigravity acts as a shadow agent, proactively monitoring conversation events and task states, executing the CLI bindings defined in the configuration, and managing issue lifecycles.
+- **Installation**: Copy this file to `~/.gemini/config/skills/shadow/SKILL.md` to install it globally.
+- **Execution**: Once installed globally or loaded in a workspace session via `view_file` with `IsSkillFile: true`, Antigravity acts as a shadow agent, proactively monitoring conversation events and task states, executing the CLI bindings defined in the configuration, and managing issue lifecycles.
 
 ---
 
