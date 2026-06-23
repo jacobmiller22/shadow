@@ -2,6 +2,12 @@
   "agent_identity": "shadow-task-tracker",
   "target_repo": "git@github.com:your-username/your-shadow-backlog-repo.git",
   "local_backlog_path": "/absolute/path/to/your/local/backlog/clone",
+  "custom_labels": {
+    "type:jira-shadow": "story",
+    "type:ad-hoc": "chore",
+    "type:personal-dev": "upskill",
+    "type:blocker": "blocked"
+  },
   "bindings": {
     "create_issue": "gh issue create --title \"{{title}}\" --body \"{{body}}\" --label \"{{labels}}\"",
     "search_issue": "gh issue list --search \"{{query}}\" --json number,title,labels",

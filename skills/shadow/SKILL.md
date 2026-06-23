@@ -94,13 +94,32 @@ The agent should lookup the configuration file at `~/.config/shadow/config.json`
 
 Every issue created must contain the following structured metadata block at the top of the body, along with appropriate labels:
 
-### Required Labels
+### Required & Custom Labels
 
+By default, the following standard labels are used by shadow to categorize tasks:
 - `type:jira-shadow`: For tracking work mirroring an official Jira story.
 - `type:ad-hoc`: Unplanned tasks, requests from teammates, Slack drive-bys, quick bug fixes.
 - `type:personal-dev`: Upskilling, reading docs, architecture research, side projects.
 - `type:blocker`: Dependencies holding up progress.
 - `project:<project_name>`: Categorizes the issue under a specific project folder.
+
+#### Custom Label Configuration
+To accommodate external project boards governed by specific labels, the user can define label overrides in the configuration file (`~/.config/shadow/config.json`) under the optional `"custom_labels"` object:
+
+```json
+  "custom_labels": {
+    "type:jira-shadow": "story",
+    "type:ad-hoc": "chore",
+    "type:personal-dev": "upskill",
+    "type:blocker": "blocked"
+  }
+```
+
+When creating or managing issues, you must resolve the labels using this configuration:
+1. Load `~/.config/shadow/config.json` and check for `"custom_labels"`.
+2. Map any standard required labels (like `type:ad-hoc`) to the user's custom label string (like `chore`) if mapped.
+3. Fall back to the default standard label if the key is missing from `"custom_labels"` or if `"custom_labels"` is not configured.
+4. If project-level custom labels are specified in the project's config file (e.g. `projects/<project_name>/README.md` under a `labels` frontmatter tag), also apply those labels.
 
 ### Metadata Block Template
 

@@ -53,6 +53,7 @@ gh auth login
 3. Open `~/.config/shadow/config.json` and configure:
    - **`target_repo`**: The exact SSH or HTTPS URL of your backlog repository (e.g., `git@github.com:your-username/your-shadow-backlog-repo.git`).
    - **`local_backlog_path`**: The absolute path to the local directory where you cloned the backlog repository in Step 1 (e.g., `/Users/your-username/projects/shadowtracker`).
+   - **`custom_labels`** (Optional): A mapping of standard shadow labels (e.g. `type:jira-shadow`, `type:ad-hoc`, etc.) to custom ones configured on your GitHub project board.
 
 Here is a template of `~/.config/shadow/config.json`:
 ```json
@@ -60,6 +61,12 @@ Here is a template of `~/.config/shadow/config.json`:
   "agent_identity": "shadow-task-tracker",
   "target_repo": "git@github.com:your-username/your-shadow-backlog-repo.git",
   "local_backlog_path": "/Users/your-username/projects/shadowtracker",
+  "custom_labels": {
+    "type:jira-shadow": "story",
+    "type:ad-hoc": "chore",
+    "type:personal-dev": "upskill",
+    "type:blocker": "blocked"
+  },
   "bindings": {
     "create_issue": "gh issue create --title \"{{title}}\" --body \"{{body}}\" --label \"{{labels}}\"",
     "search_issue": "gh issue list --search \"{{query}}\" --json number,title,labels",
@@ -138,6 +145,8 @@ You are equipped to help the user manage intense context switching by maintainin
 
 4. **Format Enforcement**:
    - Always apply the metadata block and standard type labels outlined in the `SKILL.md` skill definition.
+   - If `"custom_labels"` mapping is defined in the configuration file, resolve standard labels (e.g., `type:ad-hoc`) to the user's custom mapped labels (e.g., `chore`) before invoking bindings. Fall back to the default standard label if the key is missing from `"custom_labels"`.
+   - Apply any project-specific labels defined under the `labels` frontmatter tag in the project's config file (`projects/<project_name>/README.md`).
 ```
 
 ---
