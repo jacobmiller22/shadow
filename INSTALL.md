@@ -38,22 +38,25 @@ gh auth login
    *(Note down the exact directory where you cloned this repository, as you will need it in Step 2).*
 
 ---
+## Step 2: Run the Automated Install Script
 
-## Step 2: Configure Shadow Config File
+To automatically configure the directories, copy configuration files, and install the Antigravity global skill, run the installation script from the root of the shadow workspace:
 
-1. Create the global configuration directory:
-   ```bash
-   mkdir -p ~/.config/shadow
-   ```
-2. Copy the default configuration to this path:
-   ```bash
-   # (Run this command from the shadow workspace)
-   cp example.config.json ~/.config/shadow/config.json
-   ```
-3. Open `~/.config/shadow/config.json` and configure:
-   - **`target_repo`**: The exact SSH or HTTPS URL of your backlog repository (e.g., `git@github.com:your-username/your-shadow-backlog-repo.git`).
-   - **`local_backlog_path`**: The absolute path to the local directory where you cloned the backlog repository in Step 1 (e.g., `/Users/your-username/projects/shadowtracker`).
-   - **`custom_labels`** (Optional): A mapping of standard shadow labels (e.g. `type:jira-shadow`, `type:ad-hoc`, etc.) to custom ones configured on your GitHub project board.
+```bash
+./install.sh
+```
+
+This script will:
+1. Verify prerequisites (`gh`, `jq`) and check your GitHub CLI authentication.
+2. Create configuration, scratch, and offline queue directories: `~/.config/shadow`, `~/.config/shadow/scratch`, and `~/.config/shadow/queue`.
+3. Initialize the config file `~/.config/shadow/config.json` and create `~/.config/shadow/error.log` for validation recovery logging.
+4. Perform an automatic TTL cleanup to prune any stale local scratch drafts older than 24 hours.
+5. Install the Antigravity global skill by copying `skills/shadow/SKILL.md` to `~/.gemini/config/skills/shadow/SKILL.md`.
+
+Once completed, open `~/.config/shadow/config.json` and configure:
+- **`target_repo`**: The exact SSH or HTTPS URL of your backlog repository (e.g., `git@github.com:your-username/your-shadow-backlog-repo.git`).
+- **`local_backlog_path`**: The absolute path to the local directory where you cloned the backlog repository in Step 1 (e.g., `/Users/your-username/projects/shadowtracker`).
+- **`custom_labels`** (Optional): A mapping of standard shadow labels (e.g. `type:jira-shadow`, `type:ad-hoc`, etc.) to custom ones configured on your GitHub project board.
 
 Here is a template of `~/.config/shadow/config.json`:
 ```json
@@ -101,16 +104,13 @@ To install the skill in Claude Code, run the plugin command pointing to either t
 Once installed, Claude Code will automatically detect context-switching triggers or allow manual execution using the `/shadow` slash command.
 
 ### B. Antigravity
-To install the skill for Antigravity globally:
+The global installation is automatically handled by the `install.sh` script (which copies the skill to `~/.gemini/config/skills/shadow/SKILL.md`). 
 
-1. Create the shadow skill folder in the global Gemini config directory:
-   ```bash
-   mkdir -p ~/.gemini/config/skills/shadow
-   ```
-2. Copy `SKILL.md` to the global skill location:
-   ```bash
-   cp skills/shadow/SKILL.md ~/.gemini/config/skills/shadow/SKILL.md
-   ```
+If you need to manually copy or reinstall it, run:
+```bash
+mkdir -p ~/.gemini/config/skills/shadow
+cp skills/shadow/SKILL.md ~/.gemini/config/skills/shadow/SKILL.md
+```
 
 Alternatively, to instruct Antigravity to follow the task tracking protocol in a single workspace session, load it directly using the `view_file` tool with `IsSkillFile: true` pointing to `skills/shadow/SKILL.md`.
 
@@ -143,11 +143,19 @@ You are equipped to help the user manage intense context switching by maintainin
    - When a task is completed or paused, append a brief comment to the issue listing the latest state, files edited, and shell commands that were successful.
    - Automatically close issues when tasks are completed, reopen them when resumed, or update labels.
 
-4. **Format Enforcement**:
-   - Always apply the metadata block and standard type labels outlined in the `SKILL.md` skill definition.
-   - If `"custom_labels"` mapping is defined in the configuration file, resolve standard labels (e.g., `type:ad-hoc`) to the user's custom mapped labels (e.g., `chore`) before invoking bindings. Fall back to the default standard label if the key is missing from `"custom_labels"`.
-   - Apply any project-specific labels defined under the `labels` frontmatter tag in the project's config file (`projects/<project_name>/README.md`).
+4. **Format & Commenting Enforcement**:
+   - Always apply the strict issue body layout (Description, Scope & Checklist, References, Technical Context).
+   - Actively search context and outputs to extract and sanitize multiple reference links (Jira, GitHub, CI, Docs).
+   - Resolve standard labels using `"custom_labels"` mapping in `~/.config/shadow/config.json`.
+   - Check for existing open/closed issues using `search_issue` to avoid duplicates.
+   - Append intermediate progress logs as comments rather than modifying the main description.
+   - Concurrency Scratch Drafting: Draft payloads to high-entropy files `scratch_<timestamp>_<uuid>.md` in `~/.config/shadow/scratch/` and delete after push.
+   - Git Reconciliation: Run `git pull --rebase` inside the backlog repository before commits/pushes to prevent locks/conflicts.
+   - Offline Local Cache: Queue scratch files in `~/.config/shadow/queue/` on network/API failure and sync in FIFO order when connectivity returns.
+   - Dual-Verification Closure: Never close tasks on build/test failures. Require checklist completion, green tests, and runtime verification.
+   - Recovery Fallbacks: If `config.json` is missing or corrupt, fallback to vanilla CLI execution and standard labels, logging warnings to `error.log`.
 ```
+
 
 ---
 

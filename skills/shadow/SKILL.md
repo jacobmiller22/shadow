@@ -132,3 +132,99 @@ status: [In Progress / Blocked / Completed]
 context_tags: [e.g., #frontend, #auth, #ci-cd]
 ---
 ```
+
+---
+
+## 📋 Strict Issue Body Formatting
+
+The main body of every created issue must follow this exact markdown layout structure:
+
+```markdown
+# Description
+[High-level summary of the task, objective, and acceptance criteria]
+
+# Scope & Checklist
+- [ ] Task 1
+- [ ] Task 2
+
+# References
+- [Source URL 1]
+- [Source URL 2]
+
+# Technical Context
+- **Active Branch**: [branch name or None]
+- **Modified Files**: [list of files or None]
+- **Environment**: [development/staging/production]
+```
+
+## 🔗 Link Autopopulation & Sanitization Rules
+
+To ensure issues are fully traceable, you must actively parse conversation context, git history, branch names, and command outputs to discover references:
+1. **Extract and format links**: Gather all relevant URLs such as:
+   - **Jira tickets**: e.g., `https://jira.company.com/browse/PROJ-123`
+   - **GitHub commits/PRs**: e.g., `https://github.com/...`
+   - **CI runs**: e.g., GitHub Actions, Jenkins, CircleCI pipeline logs
+   - **Documents**: Google Docs, Wiki links, diagrams
+2. **URL Sanitization**:
+   - Trim trailing punctuation like `.`, `,`, `)`, `]`, `>` from the extracted URL.
+   - Validate that the URL matches a valid scheme (must start with `http://` or `https://`).
+   - De-duplicate identical URLs to keep the `# References` list clean and readable.
+3. **Support Multiple Links**: Do not limit reference links to just one per source. List all related links under the `# References` section of the issue description or in subsequent comments.
+
+---
+
+## 📝 Commenting & Anti-Duplication Protocols
+
+1. **The No-Duplicate Rule**: Before creating a new issue, search both open and closed issues in the backlog repository using the configured `search_issue` binding. If a tracking issue already exists for the context or task at hand, **reopen and/or update** it rather than creating a duplicate.
+2. **The Append-Only History Rule**: Intermediate updates, debug logs, files modified, and successful CLI command outputs must be appended to the issue as **comments** rather than editing the main issue description. This maintains a clear audit trail of progress.
+
+---
+
+## 🛡️ Premature Close Prevention & Safety
+
+To prevent losing context on incomplete or broken work:
+1. **Do Not Close on Failure**: Never close an issue if unit tests are failing, the build/compilation is broken, blockers remain unresolved, or subtasks in the checklist are incomplete.
+2. **State Tracking**: If work stops but is incomplete or broken, transition the status to `Blocked` or keep it `In Progress`. Add a comment specifying the failure logs and files modified.
+3. **Dual-Verification Closure Criteria**: Only close an issue when:
+   - All checklist items are checked and completed.
+   - Unit tests are verified green.
+   - **Runtime verification** is performed (e.g., executing the service, verifying log outputs for the feature) OR the user explicitly signals task completion / accepts the judgment.
+
+---
+
+## 💾 Local Scratch Drafting Flow (Concurrency Support)
+
+To support multiple agent instances running concurrently without filename collisions:
+1. **Generate Unique Filename**: Before executing the GitHub CLI binding to create or update an issue, write the payload to a draft file under `~/.config/shadow/scratch/`. The filename must use a standardized high-entropy, unique identifier: `scratch_<ISO8601-timestamp>_<UUIDv4_or_16_char_hex>.md` (e.g. `scratch_20260623T024000Z_a8f9c2d7b5e43a12.md`).
+2. **Upload/Binding Execution**: Run the resolved issue tracking binding (e.g., `gh issue create` or `gh issue comment`) passing the contents of the unique scratch file.
+3. **Draft Cleanup**: Upon successful creation/update, immediately delete the scratch markdown file.
+
+---
+
+## 🔄 Git Reconciliation Routine
+
+To prevent git push locks and merge conflicts in multi-workspace backlog repositories:
+1. **Pre-push Rebase**: Always run `git pull --rebase` inside the backlog repository before executing any commit or push.
+2. **Exponential Backoff**: In case of push rejection or remote ref locking, sleep for a short duration and retry up to 3 times with exponential backoff (e.g., 1s, 2s, 4s).
+3. **Conflict Resolution**: If git conflicts cannot be resolved automatically, dump the conflicting file contents to the scratch folder and request manual resolution from the user.
+
+---
+
+## 📶 Offline Mode & Local Queuing
+
+To ensure task tracking states are preserved during offline mode, timeouts, or GitHub CLI/API failures:
+1. **Detect Network Failures**: If any binding command fails with a non-zero exit code due to socket timeouts, DNS resolution failures, or API rate limits, catch the error.
+2. **Queue Payload**: Move/rename the scratch file from `~/.config/shadow/scratch/scratch_*.md` to `~/.config/shadow/queue/queue_<timestamp>_<id>.md`.
+3. **Start-of-Session Processing**: At the start of every session/task, check `~/.config/shadow/queue/` for any cached payloads.
+4. **FIFO Re-synchronization**: If connectivity is restored (e.g., `gh auth status` passes or a ping succeeds), process all queue files chronologically (First-In, First-Out) using the appropriate bindings, then delete the queued files.
+
+---
+
+## 🐞 Configuration Failbacks & Error Recovery
+
+To prevent agent crashes due to configuration faults:
+1. **Validation & Recovery**: If the configuration file `~/.config/shadow/config.json` is missing or contains malformed JSON:
+   - Fall back to vanilla CLI commands directly (e.g., standard `gh issue create`, `gh issue comment`).
+   - Fall back to standard default labels (e.g., `type:ad-hoc`, `project:<name>`) if label mappings are corrupt.
+2. **Error Logging**: Log configuration parsing warnings or command failures to the local log file `~/.config/shadow/error.log` instead of breaking execution.
+
