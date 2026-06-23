@@ -52,6 +52,7 @@ This script will:
 3. Initialize the config file `~/.config/shadow/config.json` and create `~/.config/shadow/error.log` for validation recovery logging.
 4. Perform an automatic TTL cleanup to prune any stale local scratch drafts older than 24 hours.
 5. Install the Antigravity global skill by copying `skills/shadow/SKILL.md` to `~/.gemini/config/skills/shadow/SKILL.md`.
+6. Configure the global `~/.gemini/GEMINI.md` guidelines automatically to ensure the shadow skill is loaded and executed proactively on every session startup.
 
 Once completed, open `~/.config/shadow/config.json` and configure:
 - **`target_repo`**: The exact SSH or HTTPS URL of your backlog repository (e.g., `git@github.com:your-username/your-shadow-backlog-repo.git`).
@@ -104,15 +105,47 @@ To install the skill in Claude Code, run the plugin command pointing to either t
 Once installed, Claude Code will automatically detect context-switching triggers or allow manual execution using the `/shadow` slash command.
 
 ### B. Antigravity
-The global installation is automatically handled by the `install.sh` script (which copies the skill to `~/.gemini/config/skills/shadow/SKILL.md`). 
+To enable intelligent, proactive execution in Antigravity (Google's agent-first platform), the agent must be globally instructed to check and run the shadow skill at the start of every session.
 
-If you need to manually copy or reinstall it, run:
-```bash
-mkdir -p ~/.gemini/config/skills/shadow
-cp skills/shadow/SKILL.md ~/.gemini/config/skills/shadow/SKILL.md
-```
+1. **Install the Skill**:
+   The skill file is automatically copied to `~/.gemini/config/skills/shadow/SKILL.md` by the `install.sh` script. If you need to copy it manually:
+   ```bash
+   mkdir -p ~/.gemini/config/skills/shadow
+   cp skills/shadow/SKILL.md ~/.gemini/config/skills/shadow/SKILL.md
+   ```
 
-Alternatively, to instruct Antigravity to follow the task tracking protocol in a single workspace session, load it directly using the `view_file` tool with `IsSkillFile: true` pointing to `skills/shadow/SKILL.md`.
+2. **Configure Global Instructions**:
+   Since Antigravity does not automatically execute skills unless instructed, you must add startup rules to your global `~/.gemini/GEMINI.md` file. Append the following block to your `~/.gemini/GEMINI.md` (or create it if it does not exist):
+   ```markdown
+   # Antigravity Global Guidelines
+
+   ## Task Tracking Protocol (shadow)
+   You are equipped to help the user manage intense context switching by maintaining a private task repository.
+
+   ### Startup Instruction
+   At the start of every conversation, task, or user request, you MUST:
+   1. Load and read the global `shadow` skill at `~/.gemini/config/skills/shadow/SKILL.md` using the `view_file` tool.
+   2. Initialize and synchronize the task state silently and asynchronously in the background.
+
+   ### Operational Lifecycle
+   - At the start, periodically between, and at the end of completing tasks, you must:
+     - Always leverage a relevant subagent to document with "shadow".
+     - Make sure the relevant issue is created/updated at every stage.
+     - Updates via shadow should not request permission or confirmation from the user, and should always run async in the background.
+
+   ### Config & Project Context Awareness
+   - Locate and read the configuration file at `~/.config/shadow/config.json` to load the target repository and bindings.
+   - For tasks under a project, read its directory at `projects/<project_name>/` in the backlog repository (defined by `local_backlog_path`). Parse `projects/<project_name>/README.md`'s YAML frontmatter to get the local directory (`local_path`) and documentation references (`docs_url`).
+   - Execute task management operations (creating, searching, commenting, closing, reopening, listing, viewing, and labeling issues) by resolving the configured bindings.
+
+   ### Proactive Shadowing
+   - You do not need explicit permission to track tasks. If the user announces a pivot, a blocking issue, or an ad-hoc request, silently verify if a tracking issue exists. If not, create one.
+   - When a task is completed or paused, append a brief comment to the issue listing the latest state, files edited, and shell commands that were successful.
+   - Automatically close issues when tasks are completed, reopen them when resumed, or update labels.
+
+   ### Format Enforcement
+   - Always apply the metadata block and standard type labels outlined in the `SKILL.md` skill definition.
+   ```
 
 ### C. Fallback: Global `CLAUDE.md` (For other compatible agents)
 If your environment does not support folder-based skill packages, you can enable global task-tracking protocol support by appending it to your global `~/.claude/CLAUDE.md` file:

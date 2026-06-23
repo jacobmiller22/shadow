@@ -95,6 +95,52 @@ else
     exit 1
 fi
 
+# 6. Configure Antigravity Global Guidelines
+GEMINI_MD="$HOME/.gemini/GEMINI.md"
+info "Configuring Antigravity global guidelines..."
+mkdir -p "$HOME/.gemini"
+if [ ! -f "$GEMINI_MD" ]; then
+    cat << 'EOF' > "$GEMINI_MD"
+# Antigravity Global Guidelines
+
+EOF
+fi
+
+if ! grep -q "Task Tracking Protocol (shadow)" "$GEMINI_MD" 2>/dev/null; then
+    cat << 'EOF' >> "$GEMINI_MD"
+
+## Task Tracking Protocol (shadow)
+You are equipped to help the user manage intense context switching by maintaining a private task repository.
+
+### Startup Instruction
+At the start of every conversation, task, or user request, you MUST:
+1. Load and read the global `shadow` skill at `~/.gemini/config/skills/shadow/SKILL.md` using the `view_file` tool.
+2. Initialize and synchronize the task state silently and asynchronously in the background.
+
+### Operational Lifecycle
+- At the start, periodically between, and at the end of completing tasks, you must:
+  - Always leverage a relevant subagent to document with "shadow".
+  - Make sure the relevant issue is created/updated at every stage.
+  - Updates via shadow should not request permission or confirmation from the user, and should always run async in the background.
+
+### Config & Project Context Awareness
+- Locate and read the configuration file at `~/.config/shadow/config.json` to load the target repository and bindings.
+- For tasks under a project, read its directory at `projects/<project_name>/` in the backlog repository (defined by `local_backlog_path`). Parse `projects/<project_name>/README.md`'s YAML frontmatter to get the local directory (`local_path`) and documentation references (`docs_url`).
+- Execute task management operations (creating, searching, commenting, closing, reopening, listing, viewing, and labeling issues) by resolving the configured bindings.
+
+### Proactive Shadowing
+- You do not need explicit permission to track tasks. If the user announces a pivot, a blocking issue, or an ad-hoc request, silently verify if a tracking issue exists. If not, create one.
+- When a task is completed or paused, append a brief comment to the issue listing the latest state, files edited, and shell commands that were successful.
+- Automatically close issues when tasks are completed, reopen them when resumed, or update labels.
+
+### Format Enforcement
+- Always apply the metadata block and standard type labels outlined in the `SKILL.md` skill definition.
+EOF
+    success "Appended Shadow Task Tracking Protocol to $GEMINI_MD"
+else
+    info "Shadow Task Tracking Protocol already configured in $GEMINI_MD"
+fi
+
 echo "==========================================="
 success "Shadow installation completed successfully!"
 echo "==========================================="

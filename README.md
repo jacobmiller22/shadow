@@ -18,6 +18,6 @@ For complete setup and installation instructions, including prerequisites, confi
 
 ## File Structure
 
-- [SKILL.md](file:///Users/jacobmiller22/projects/shadow/SKILL.md): Defines the core capabilities, metadata, and labeling schema.
+- [SKILL.md](file:///Users/jacobmiller22/projects/shadow/skills/shadow/SKILL.md): Defines the core capabilities, metadata, and labeling schema.
 - [example.config.json](file:///Users/jacobmiller22/projects/shadow/example.config.json): Declarative configuration template defining bindings for tools (like `gh` CLI or other internal tools).
 - [TASK_GUIDELINES.md](file:///Users/jacobmiller22/projects/shadow/TASK_GUIDELINES.md): Concrete examples and triggers of when to log issues.
