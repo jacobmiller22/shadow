@@ -41,18 +41,18 @@ else
     success "GitHub CLI is authenticated."
 fi
 
-# 3. Create Configuration, Scratch, and Queue Directories
+# 3. Create Configuration, Queue, and Scratch Directories
 CONFIG_DIR="$HOME/.config/shadow"
-SCRATCH_DIR="$CONFIG_DIR/scratch"
+SCRATCH_DIR="$HOME/.local/share/shadow"
 QUEUE_DIR="$CONFIG_DIR/queue"
 ERROR_LOG="$CONFIG_DIR/error.log"
 
-info "Creating configuration and queue directories..."
+info "Creating configuration, queue, and scratch directories..."
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$SCRATCH_DIR"
 mkdir -p "$QUEUE_DIR"
 touch "$ERROR_LOG"
-success "Directories created: $CONFIG_DIR, $SCRATCH_DIR, and $QUEUE_DIR"
+success "Directories created: $CONFIG_DIR, $QUEUE_DIR, and $SCRATCH_DIR"
 
 # Prune scratch files older than 24 hours (TTL Cleanup)
 info "Cleaning up stale scratch drafts older than 24 hours..."
@@ -112,16 +112,11 @@ if ! grep -q "Task Tracking Protocol (shadow)" "$GEMINI_MD" 2>/dev/null; then
 ## Task Tracking Protocol (shadow)
 You are equipped to help the user manage intense context switching by maintaining a private task repository.
 
-### Startup Instruction
-At the start of every conversation, task, or user request, you MUST:
-1. Load and read the global `shadow` skill at `~/.gemini/config/skills/shadow/SKILL.md` using the `view_file` tool.
-2. Initialize and synchronize the task state silently and asynchronously in the background.
-
 ### Operational Lifecycle
-- At the start, periodically between, and at the end of completing tasks, you must:
-  - Always leverage a relevant subagent to document with "shadow".
-  - Make sure the relevant issue is created/updated at every stage.
-  - Updates via shadow should not request permission or confirmation from the user, and should always run async in the background.
+The shadow skill should be loaded at the start and end of every conversation, and during conversations when it appears that an item of work or as soon as meaningful progress has been made, repeating until the conversation is closed.
+At these points, you must:
+1. Load and read the global `shadow` skill at `~/.gemini/config/skills/shadow/SKILL.md` using the `view_file` tool.
+2. Silently initialize, synchronize, and update task states asynchronously in the background (using a relevant subagent to document with "shadow") without requesting user permission or confirmation, ensuring that the metadata frontmatter `status` in the issue body is actively updated to `In Progress` during iterations and resumptions.
 
 ### Config & Project Context Awareness
 - Locate and read the configuration file at `~/.config/shadow/config.json` to load the target repository and bindings.

@@ -48,7 +48,7 @@ To automatically configure the directories, copy configuration files, and instal
 
 This script will:
 1. Verify prerequisites (`gh`, `jq`) and check your GitHub CLI authentication.
-2. Create configuration, scratch, and offline queue directories: `~/.config/shadow`, `~/.config/shadow/scratch`, and `~/.config/shadow/queue`.
+2. Create configuration, queue, and dedicated scratch directories: `~/.config/shadow`, `~/.config/shadow/queue`, and `~/.local/share/shadow`.
 3. Initialize the config file `~/.config/shadow/config.json` and create `~/.config/shadow/error.log` for validation recovery logging.
 4. Perform an automatic TTL cleanup to prune any stale local scratch drafts older than 24 hours.
 5. Install the Antigravity global skill by copying `skills/shadow/SKILL.md` to `~/.gemini/config/skills/shadow/SKILL.md`.
@@ -182,9 +182,9 @@ You are equipped to help the user manage intense context switching by maintainin
    - Resolve standard labels using `"custom_labels"` mapping in `~/.config/shadow/config.json`.
    - Check for existing open/closed issues using `search_issue` to avoid duplicates.
    - Append intermediate progress logs as comments rather than modifying the main description.
-   - Concurrency Scratch Drafting: Draft payloads to high-entropy files `scratch_<timestamp>_<uuid>.md` in `~/.config/shadow/scratch/` and delete after push.
+   - Concurrency Scratch Drafting: Draft payloads to `scratch_<timestamp>_<task_slug>.md` files in `~/.local/share/shadow/` and delete after push.
    - Git Reconciliation: Run `git pull --rebase` inside the backlog repository before commits/pushes to prevent locks/conflicts.
-   - Offline Local Cache: Queue scratch files in `~/.config/shadow/queue/` on network/API failure and sync in FIFO order when connectivity returns.
+   - Offline Local Cache: Move scratch files from `~/.local/share/shadow/` to `~/.config/shadow/queue/` on network/API failure and sync in FIFO order when connectivity returns.
    - Dual-Verification Closure: Never close tasks on build/test failures. Require checklist completion, green tests, and runtime verification.
    - Recovery Fallbacks: If `config.json` is missing or corrupt, fallback to vanilla CLI execution and standard labels, logging warnings to `error.log`.
 ```

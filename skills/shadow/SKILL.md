@@ -27,10 +27,10 @@ Defines the protocol for proactively managing the user's personal task backlog i
 
 ## Operational Lifecycle Guidelines
 
-At the start, periodically between, and at the end of completing tasks, you must:
-1. **Always leverage a relevant subagent to document with "shadow"**: Use a background subagent (e.g., `research` or a subagent loaded with the `shadow` skill) to execute task-tracking operations.
-2. **Make sure the relevant issue is created/updated at every stage**: Ensure issues are created or commented on at the start of a task, as updates occur, and upon task completion.
-3. **Execute silently and asynchronously**: All updates via `shadow` should not request permission or confirmation from the user, and should always run asynchronously in the background.
+The shadow skill should be loaded at the start and end of every conversation, and during conversations when it appears that an item of work or as soon as meaningful progress has been made, repeating until the conversation is closed.
+At these points, you must:
+1. **Load and read the global skill**: Load the skill at `~/.gemini/config/skills/shadow/SKILL.md`.
+2. **Create/update tasks asynchronously**: Silently initialize, synchronize, and update task states asynchronously in the background (using a relevant subagent to document with "shadow") without requesting user permission or confirmation.
 
 ---
 
@@ -101,6 +101,7 @@ By default, the following standard labels are used by shadow to categorize tasks
 - `type:ad-hoc`: Unplanned tasks, requests from teammates, Slack drive-bys, quick bug fixes.
 - `type:personal-dev`: Upskilling, reading docs, architecture research, side projects.
 - `type:blocker`: Dependencies holding up progress.
+- `type:in-progress`: For tasks currently active/in progress.
 - `project:<project_name>`: Categorizes the issue under a specific project folder.
 
 #### Custom Label Configuration
@@ -111,7 +112,8 @@ To accommodate external project boards governed by specific labels, the user can
     "type:jira-shadow": "story",
     "type:ad-hoc": "chore",
     "type:personal-dev": "upskill",
-    "type:blocker": "blocked"
+    "type:blocker": "blocked",
+    "type:in-progress": "in-progress"
   }
 ```
 
@@ -173,10 +175,22 @@ To ensure issues are fully traceable, you must actively parse conversation conte
 
 ---
 
-## 📝 Commenting & Anti-Duplication Protocols
+## 📝 Commenting, Body Sync & Anti-Bloat Protocols
 
 1. **The No-Duplicate Rule**: Before creating a new issue, search both open and closed issues in the backlog repository using the configured `search_issue` binding. If a tracking issue already exists for the context or task at hand, **reopen and/or update** it rather than creating a duplicate.
 2. **The Append-Only History Rule**: Intermediate updates, debug logs, files modified, and successful CLI command outputs must be appended to the issue as **comments** rather than editing the main issue description. This maintains a clear audit trail of progress.
+3. **Issue Body & Checklist Synchronization**:
+   - When a task is actively being worked on, resumed, or progresses, the agent **must** immediately update the main issue description body itself to ensure the metadata frontmatter `status` is explicitly set to `In Progress` (especially if it was previously `Blocked` or if the task is being resumed/reopened).
+   - In addition to updating the body status, the agent **must** ensure that the `type:in-progress` label (resolved via `"custom_labels"` configuration if present) is actively added to the issue (using the `add_label` binding) during active development, task pivots, or task resumptions.
+   - When a task completes, becomes blocked, or is paused (e.g., during session wrap-up or blocker registration), the agent **must** immediately remove the `type:in-progress` label (using the `remove_label` binding).
+   - The agent **must** update the main issue description body itself using the `update_issue_body` or `update_issue_body_file` binding to keep the frontmatter `status` (e.g., `status: In Progress`, `status: Completed`) and the `# Scope & Checklist` checkboxes (e.g., `- [x] Task 1`) fully in sync with the task's actual state during and at the end of iterations.
+4. **Command & Log Filtering**:
+   - Do **not** log read-only or trivial/informational shell commands (e.g., `git diff`, `git status`, `git branch`, `git log`, `ls`, `pwd`, `cat`, `which`, `gh auth status`, `gh issue list`) in comments.
+   - Only log state-modifying or validating commands (e.g., `git commit`, `git push`, build commands, test runs, or script executions).
+5. **Comment Cleanliness & Anti-Bloat**:
+   - Issue comments **must never** contain YAML frontmatter blocks. Frontmatter is strictly reserved for the top of the main issue description.
+   - At task completion/closure, do **not** post redundant progress comments and closure comments back-to-back. Instead, consolidate them: either update the main body checklist to complete and close the issue with a single descriptive closure comment, or close silently without a duplicate closure comment if a detailed summary comment has just been posted.
+   - Avoid posting automated "Still in progress" comments during routine start-of-session checks unless new files were modified or state changes occurred.
 
 ---
 
@@ -184,9 +198,9 @@ To ensure issues are fully traceable, you must actively parse conversation conte
 
 To prevent losing context on incomplete or broken work:
 1. **Do Not Close on Failure**: Never close an issue if unit tests are failing, the build/compilation is broken, blockers remain unresolved, or subtasks in the checklist are incomplete.
-2. **State Tracking**: If work stops but is incomplete or broken, transition the status to `Blocked` or keep it `In Progress`. Add a comment specifying the failure logs and files modified.
+2. **State Tracking**: If work stops but is incomplete or broken, transition the status to `Blocked` or keep it `In Progress` (and when returning to or resuming the task, immediately update the metadata `status` to `In Progress` in the main issue body and apply the `type:in-progress` label). If the task is blocked, ensure the `type:in-progress` label is removed and the `type:blocker` label is added. Add a comment specifying the failure logs and files modified.
 3. **Dual-Verification Closure Criteria**: Only close an issue when:
-   - All checklist items are checked and completed.
+   - All checklist items in the main issue description are updated, checked (`[x]`), and completed.
    - Unit tests are verified green.
    - **Runtime verification** is performed (e.g., executing the service, verifying log outputs for the feature) OR the user explicitly signals task completion / accepts the judgment.
 
@@ -195,8 +209,8 @@ To prevent losing context on incomplete or broken work:
 ## 💾 Local Scratch Drafting Flow (Concurrency Support)
 
 To support multiple agent instances running concurrently without filename collisions:
-1. **Generate Unique Filename**: Before executing the GitHub CLI binding to create or update an issue, write the payload to a draft file under `~/.config/shadow/scratch/`. The filename must use a standardized high-entropy, unique identifier: `scratch_<ISO8601-timestamp>_<UUIDv4_or_16_char_hex>.md` (e.g. `scratch_20260623T024000Z_a8f9c2d7b5e43a12.md`).
-2. **Upload/Binding Execution**: Run the resolved issue tracking binding (e.g., `gh issue create` or `gh issue comment`) passing the contents of the unique scratch file.
+1. **Generate Unique Filename**: Before executing the GitHub CLI binding to create or update an issue, write the payload to a draft file under `~/.local/share/shadow/`. The filename must use a task-relevant unique identifier: `scratch_<ISO8601-timestamp>_<task_slug>.md` where `<task_slug>` is a short, lowercase snake_case or kebab-case phrase derived from the task title or description (e.g. `scratch_20260623T024000Z_fix_expired_staging_auth_token.md`).
+2. **Upload/Binding Execution**: Run the resolved issue tracking binding (e.g., `gh issue create`, `gh issue comment`, or body editing/updating via `update_issue_body_file`) passing the contents of the unique scratch file.
 3. **Draft Cleanup**: Upon successful creation/update, immediately delete the scratch markdown file.
 
 ---
@@ -206,7 +220,7 @@ To support multiple agent instances running concurrently without filename collis
 To prevent git push locks and merge conflicts in multi-workspace backlog repositories:
 1. **Pre-push Rebase**: Always run `git pull --rebase` inside the backlog repository before executing any commit or push.
 2. **Exponential Backoff**: In case of push rejection or remote ref locking, sleep for a short duration and retry up to 3 times with exponential backoff (e.g., 1s, 2s, 4s).
-3. **Conflict Resolution**: If git conflicts cannot be resolved automatically, dump the conflicting file contents to the scratch folder and request manual resolution from the user.
+3. **Conflict Resolution**: If git conflicts cannot be resolved automatically, dump the conflicting file contents to the dedicated scratch folder (`~/.local/share/shadow/`) and request manual resolution from the user.
 
 ---
 
@@ -214,7 +228,7 @@ To prevent git push locks and merge conflicts in multi-workspace backlog reposit
 
 To ensure task tracking states are preserved during offline mode, timeouts, or GitHub CLI/API failures:
 1. **Detect Network Failures**: If any binding command fails with a non-zero exit code due to socket timeouts, DNS resolution failures, or API rate limits, catch the error.
-2. **Queue Payload**: Move/rename the scratch file from `~/.config/shadow/scratch/scratch_*.md` to `~/.config/shadow/queue/queue_<timestamp>_<id>.md`.
+2. **Queue Payload**: Move/rename the scratch file from `~/.local/share/shadow/scratch_*.md` to `~/.config/shadow/queue/queue_<timestamp>_<id>.md`.
 3. **Start-of-Session Processing**: At the start of every session/task, check `~/.config/shadow/queue/` for any cached payloads.
 4. **FIFO Re-synchronization**: If connectivity is restored (e.g., `gh auth status` passes or a ping succeeds), process all queue files chronologically (First-In, First-Out) using the appropriate bindings, then delete the queued files.
 

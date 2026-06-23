@@ -6,12 +6,15 @@
     "type:jira-shadow": "story",
     "type:ad-hoc": "chore",
     "type:personal-dev": "upskill",
-    "type:blocker": "blocked"
+    "type:blocker": "blocked",
+    "type:in-progress": "in-progress"
   },
   "bindings": {
     "create_issue": "gh issue create --title \"{{title}}\" --body \"{{body}}\" --label \"{{labels}}\"",
     "search_issue": "gh issue list --search \"{{query}}\" --json number,title,labels",
     "update_issue": "gh issue comment {{issue_id}} --body \"{{body}}\"",
+    "update_issue_body": "gh issue edit {{issue_id}} --body \"{{body}}\"",
+    "update_issue_body_file": "gh issue edit {{issue_id}} --body-file \"{{body_file}}\"",
     "close_issue": "gh issue close {{issue_id}} --comment \"{{comment}}\"",
     "reopen_issue": "gh issue reopen {{issue_id}}",
     "list_issues": "gh issue list --state open --json number,title,labels",
