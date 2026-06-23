@@ -1,0 +1,16 @@
+{
+  "agent_identity": "shadow-task-tracker",
+  "target_repo": "git@github.com:your-username/your-shadow-backlog-repo.git",
+  "local_backlog_path": "/absolute/path/to/your/local/backlog/clone",
+  "bindings": {
+    "create_issue": "gh issue create --title \"{{title}}\" --body \"{{body}}\" --label \"{{labels}}\"",
+    "search_issue": "gh issue list --search \"{{query}}\" --json number,title,labels",
+    "update_issue": "gh issue comment {{issue_id}} --body \"{{body}}\"",
+    "close_issue": "gh issue close {{issue_id}} --comment \"{{comment}}\"",
+    "reopen_issue": "gh issue reopen {{issue_id}}",
+    "list_issues": "gh issue list --state open --json number,title,labels",
+    "view_issue": "gh issue view {{issue_id}} --json title,body,comments",
+    "add_label": "gh issue edit {{issue_id}} --add-label \"{{label}}\"",
+    "remove_label": "gh issue edit {{issue_id}} --remove-label \"{{label}}\""
+  }
+}
