@@ -2,7 +2,7 @@
 
 # Project Shadow: Local-First Developer Project Management & Enterprise Sync Bridge
 
-**Document Version:** 1.0.0  
+**Document Version:** 1.1.0  
 **Status:** Draft / Proposed  
 **Author:** Jacob Miller & Antigravity  
 **Target Audience:** Engineering, Product, AI Agent Tooling  
@@ -16,29 +16,48 @@
 
 **Shadow** is a local-first, developer-centric project management tool and synchronization bridge. It is built specifically for modern software engineers and their autonomous/semi-autonomous AI coding agents (such as Antigravity, Claude Code, Cursor, Copilot CLI, and custom agents). 
 
-Shadow decouples **how a developer works and thinks** from **how an enterprise tracks and reports**. It provides a lightning-fast, offline-capable, local project management engine with configurable hierarchies (Epics, Stories, Tasks, Spikes, Subtasks) that developers and AI agents can query and manipulate in real-time. Through an intelligent **$N \leftrightarrow M$ mapping engine**, Shadow aggregates, decomposes, sanitizes, and synchronizes work on an ad-hoc basis with mandated corporate tools such as **Jira**, **Linear**, **GitHub Issues**, and **Azure DevOps**.
+Shadow decouples **how a developer works and thinks** from **how an enterprise tracks and reports**. It provides a lightning-fast, offline-capable, local project management engine with configurable hierarchies (Epics, Stories, Tasks, Spikes, Subtasks) that developers and AI agents can query and manipulate in real-time. 
+
+**Zero-Daemon Architecture:** Shadow deliberately avoids background protocol servers or complex middleware like MCP (Model Context Protocol). Instead, Shadow relies entirely on a **rich, deterministic CLI** paired with an **Agent Skill specification (`SKILL.md`)**. Both the human engineer and the AI agent use the exact same high-performance command line interface, enabling instant portability across any AI environment (Antigravity, Claude Code, Cursor, terminal agents) with zero process overhead or socket lifecycle management.
+
+Through an intelligent **$N \leftrightarrow M$ mapping engine**, Shadow aggregates, decomposes, sanitizes, and synchronizes work on an ad-hoc basis with mandated corporate tools such as **Jira**, **Linear**, **GitHub Issues**, and **Azure DevOps**.
 
 ```
 +-----------------------------------------------------------------------------------+
 |                              LOCAL DEVELOPER WORKSPACE                            |
 |                                                                                   |
-|   +-------------------+      +-------------------+                                |
-|   | Human Developer   |      |  AI Coding Agents | (Antigravity, Claude, Cursor)  |
-|   +---------+---------+      +---------+---------+                                |
-|             |                          |                                          |
-|             +------------+-------------+                                          |
-|                          |                                                        |
-|                          v  (CLI / MCP / Unix Socket / REST)                      |
-|             +------------------------------------+                                |
-|             |          SHADOW ENGINE             |                                |
-|             |  - Local Task Hierarchy            |                                |
-|             |  - Fast Storage (SQLite / Git)     |                                |
-|             |  - Privacy & Sanitization Firewall |                                |
-|             +-----------------+------------------+                                |
-+-------------------------------|---------------------------------------------------+
-                                |
-                                |  Ad-hoc / Selective / N <-> M Bi-directional Sync
-                                v
+|   +-------------------+      +------------------------------------------+         |
+|   | Human Developer   |      |  AI Coding Agents                        |         |
+|   | (Terminal / IDE)  |      |  (Antigravity, Claude Code, Cursor)      |         |
+|   +---------+---------+      +--------------------+---------------------+         |
+|             |                                     |                               |
+|             |                     Loads & Follows | `SKILL.md` Protocol           |
+|             |                                     v                               |
+|             |                +------------------------------------------+         |
+|             |                | Agent Skill Layer (Behavior & Prompts)   |         |
+|             |                +--------------------+---------------------+         |
+|             |                                     |                               |
+|             +------------+------------------------+                               |
+|                          | Executes via Shell / Terminal                          |
+|                          v                                                        |
+|             +------------------------------------------------+                    |
+|             |                   SHADOW CLI                   |                    |
+|             |  - Human Mode (Interactive, Tables, TUI)       |                    |
+|             |  - Agent Mode (--json, --quiet, Deterministic) |                    |
+|             +-----------------------+------------------------+                    |
+|                                     |                                             |
+|                                     v                                             |
+|             +------------------------------------------------+                    |
+|             |                 SHADOW ENGINE                  |                    |
+|             |  - Local Task Hierarchy (Epics/Stories/Tasks)  |                    |
+|             |  - Fast Storage (Embedded SQLite / Git-backed) |                    |
+|             |  - N <-> M Relational Mapping & Rollups        |                    |
+|             |  - Privacy & Sanitization Firewall             |                    |
+|             +-----------------------+------------------------+                    |
++-------------------------------------|---------------------------------------------+
+                                      |
+                                      |  Ad-hoc / Selective / N <-> M Bi-directional Sync
+                                      v
 +-----------------------------------------------------------------------------------+
 |                        ORGANIZATIONAL PM TOOLING (REMOTE)                         |
 |                                                                                   |
@@ -51,7 +70,7 @@ Shadow decouples **how a developer works and thinks** from **how an enterprise t
 
 ### 1.2 Core Value Propositions
 1. **Zero Flow Interruption:** Sub-millisecond local reads and writes. No corporate SSO gates, 10-second web page loads, or mandatory multi-select dropdown forms blocking developer momentum.
-2. **First-Class Agent Ergonomics:** Native Model Context Protocol (MCP) server, robust CLI, and local API. Coding agents track and organize their own subtasks, plans, and state transitions without human overhead and without polluting enterprise boards.
+2. **First-Class Agent Ergonomics (CLI + Skills):** No background MCP daemon to start, configure, crash, or maintain. Coding agents load the official `SKILL.md` protocol and execute fast, deterministic `shadow` CLI commands with structured `--json` outputs.
 3. **Arbitrary $N \leftrightarrow M$ Projection:** Break a massive corporate Jira epic into 15 focused local tasks, or roll up 8 micro-tasks and exploratory spikes into a single clean Jira story update.
 4. **Data Privacy & Noise Firewall:** Developer scratchpads, agent debug traces, failing test iterations, and intermediate thought logs remain local. Only curated, sanitized rollups reach organizational systems.
 5. **Offline-First Resilience:** Fully functional on planes, trains, or during enterprise VPN/Jira outages, with deferred reconciliation.
@@ -95,24 +114,31 @@ Scenario B: Low Org Fidelity / High Dev Need
    - Product managers complain about ticket fragmentation and unpointed cards.  
    If the developer *doesn't* log them, the work becomes invisible, context is lost during interrupts, and progress is untracked.
 
-### 2.3 The AI Agent Explosion
+### 2.3 The AI Agent Interface Dilemma: Why CLI & Skills Win Over MCP
 Autonomous coding agents (Antigravity, Cursor, Claude Code, Cline, Aider) execute tasks in iterative loops: decomposing prompts, editing files, running tests, self-debugging, and asking for clarifications.
-- **Agents need task management:** Agents perform best when working against explicit, checklist-driven task definitions with tracked state transitions.
-- **Corporate PM tools fail agents:** Giving an agent direct write-access to corporate Jira leads to ticket pollution, API rate-limiting, authentication hurdles (Okta/SAML, short-lived tokens, 2FA), and potential security leaks of private prompt history or internal scratch data.
+- **The Pitfalls of MCP for Local Tools:**
+  - Running a separate MCP server daemon requires ongoing process management, socket listeners, port binding, and JSON-RPC message serialization.
+  - Configuration differs wildly across IDEs and tools (`claude_desktop_config.json`, `.cursor/mcp.json`, custom flags), making setup brittle and error-prone.
+  - Background server crashes or hung socket connections leave agents stranded or silently failing.
+- **The Superiority of CLI + Skills:**
+  - **Universal Support:** Every AI coding agent can execute shell commands (`run_command`, `bash`, `exec`).
+  - **Single Shared Tooling:** The developer and the AI use the exact same CLI binary (`shadow`). There are no "hidden tools" or disparities between what the human sees and what the agent sees.
+  - **Behavior Encapsulated in Skills:** Standardized `SKILL.md` markdown files teach agents the exact operational protocols: when to log tasks, how to decompose epics, how to format commit tags, and how to verify before closing.
 
 ---
 
 ## 3. Goals and Non-Goals
 
 ### 3.1 Product Goals
-- **Local Autonomy:** Provide a 100% locally hosted project management core accessible via CLI, local API, and MCP.
+- **Local Autonomy:** Provide a 100% locally hosted project management core accessible exclusively via an ultra-fast, robust CLI (`shadow`).
+- **Agent-Native via Skills:** Deliver a comprehensive, official `SKILL.md` specification that equips any AI coding agent with the intelligence, triggers, and protocols to manage tasks autonomously.
 - **$N \leftrightarrow M$ Relationship Mapping:** Enable any number of local tasks/epics/spikes to link to any number of remote tickets with custom rollups and projections.
-- **Agent-First Native Integration:** Deliver an official MCP server and zero-latency CLI bindings so coding agents can seamlessly inspect, claim, decompose, and mark tasks as done.
-- **Selective & Ad-Hoc Sync:** Give the developer complete authority over *when* and *what* syncs to organizational tooling (e.g., manual trigger, git commit hook, PR creation, or scheduled batch).
+- **Selective & Ad-Hoc Sync:** Give the developer complete authority over *when* and *what* syncs to organizational tooling (e.g., manual command `shadow sync`, git commit hook, PR creation, or scheduled batch).
 - **Sanitization & Redaction:** Provide automated filtering and markdown-to-rich-text transformers that scrub local debug noise, agent traces, and sensitive internal paths before syncing upstream.
 - **Pluggable Architecture:** Support multiple remote providers via a unified connector interface (starting with Atlassian Jira, Linear, and GitHub Issues).
 
 ### 3.2 Non-Goals
+- **No MCP Server:** Shadow explicitly does NOT implement or require a Model Context Protocol server. All programmatic access is handled via the CLI with `--json` and standard I/O.
 - **Replacing Jira for the Enterprise:** Shadow is not an enterprise-wide Jira replacement. It is a personal developer-tier proxy and local command center that coexists with Jira.
 - **Real-Time Multiplayer Collaboration (v1):** Phase 1 focuses on the individual developer and their machine's agents. Team-wide peer-to-peer sync is deferred to future phases.
 - **Complex Gantt/Waterfall Scheduling:** Shadow focuses on agile execution, task breakdowns, state transitions, and issue synchronization—not enterprise resource capacity planning.
@@ -123,9 +149,9 @@ Autonomous coding agents (Antigravity, Cursor, Claude Code, Cline, Aider) execut
 
 | Persona | Description | Core Frustrations with Current Tools | How Shadow Wins |
 |---|---|---|---|
-| **The Flow-Driven Engineer** | Senior/Staff engineer who lives in the terminal, Neovim/VSCode, and git. | Jira web UI is slow and interrupts flow. Mandatory corporate fields feel like bureaucratic waste. | Instant CLI/TUI, zero-lag local tasks, push to Jira on git push or PR creation. |
-| **The Agentic Developer** | Uses AI agents (Antigravity, Claude Code, Cursor) for 60%+ of code generation. | Agents have no structured PM tool to track subtasks without spamming Jira with 30 micro-cards. | MCP server allows agents to create, update, and close micro-tasks locally; rolls up summary to Jira. |
-| **The Cross-Functional Lead** | Works across multiple repositories and multiple organizational teams. | A single technical project requires tickets in 3 different Jira projects owned by 3 different teams. | $1 \leftrightarrow M$ mapping: lead manages one local Epic, mapped across 3 disparate Jira tickets. |
+| **The Flow-Driven Engineer** | Senior/Staff engineer who lives in the terminal, Neovim/VSCode, and git. | Jira web UI is slow and interrupts flow. Mandatory corporate fields feel like bureaucratic waste. | Instant CLI commands (`shadow add`, `shadow done`), zero-lag local tasks, push to Jira on git push or PR creation. |
+| **The Agentic Developer** | Uses AI agents (Antigravity, Claude Code, Cursor) for 60%+ of code generation. | Agents have no structured PM tool to track subtasks without spamming Jira with 30 micro-cards. MCP daemons are brittle. | Agent loads `SKILL.md` and uses `shadow --json` to track and close micro-tasks locally; rolls up summary to Jira. |
+| **The Cross-Functional Lead** | Works across multiple repositories and multiple organizational teams. | A single technical project requires tickets in 3 different Jira projects owned by 3 different teams. | $1 \leftrightarrow M$ mapping: lead manages one local Epic in Shadow, mapped across 3 disparate Jira tickets. |
 | **The Compliance-Taxed Dev** | Works in highly regulated industries (finance, healthcare, defense). | Must satisfy heavy audit and compliance tracking while writing fast code. | Shadow handles automated rollup and template generation to satisfy corporate audit fields without manual hassle. |
 
 ---
@@ -139,56 +165,95 @@ Autonomous coding agents (Antigravity, Cursor, Claude Code, Cline, Aider) execut
 |                                    SHADOW ARCHITECTURE                                 |
 +----------------------------------------------------------------------------------------+
 
-  CLIENT INTERFACES
-  +----------------------+  +---------------------+  +--------------------------------+
-  |      Shadow CLI      |  |  Shadow MCP Server  |  | Local TUI / Web GUI (Optional) |
-  |  (Terminal / Scripts)|  |  (Agent Protocol)   |  | (localhost dashboard)          |
-  +-----------+----------+  +----------+----------+  +---------------+----------------+
-              |                        |                             |
-              +-------------------+----+-----------------------------+
-                                  |
-                                  v
-  SHADOW CORE DAEMON / LIBRARY
-  +------------------------------------------------------------------------------------+
-  |  +-------------------------------------------------------------------------------+ |
-  |  | API Router & Command Dispatcher                                               | |
-  |  +-------------------------------------------------------------------------------+ |
-  |                                                                                    |
-  |  +---------------------------+  +------------------------+  +--------------------+ |
-  |  | Task & Hierarchy Engine   |  | Mapping & Rollup Engine|  | Sync & State Engine| |
-  |  | - Epics / Stories / Tasks |  | - N:M Relational Graph |  | - Push / Pull / Diff| |
-  |  | - Custom States & Tags    |  | - Markdown Projections |  | - Conflict Resolver| |
-  |  | - Git Branch/Commit Links |  | - Rollup Summarizers   |  | - Offline Queue    | |
-  |  +-------------+-------------+  +-----------+------------+  +---------+----------+ |
-  |                |                            |                         |            |
-  |                v                            v                         v            |
-  |  +-------------------------------------------------------------------------------+ |
-  |  | Privacy & Sanitization Firewall (Redaction, field masking, noise stripping)   | |
-  |  +-------------------------------------------------------------------------------+ |
-  +-----------------------------------------+------------------------------------------+
-                                            |
-                         +------------------+------------------+
-                         |                                     |
-                         v                                     v
-  STORAGE SUBSYSTEM                               ADAPTER / INTEGRATION SUBSYSTEM
-  +------------------------------------+          +------------------------------------+
-  | - Local SQLite / DuckDB Database   |          | Pluggable Remote Connectors:       |
-  | - Flat-file YAML/Markdown Mirror   |          | - Jira Connector (REST / ADF)      |
-  | - OS Keychain Credential Store     |          | - Linear Connector (GraphQL)       |
-  | - Offline Mutation Queue           |          | - GitHub Issues Connector (REST)   |
-  +------------------------------------+          | - Azure DevOps Connector (REST)    |
-                                                  +------------------------------------+
+  HUMAN DEVELOPER                                      AI CODING AGENTS
+  (Terminal / Tmux / IDE)                              (Antigravity, Claude Code, Cursor)
+        |                                                     |
+        |                                                     | Loads instructions
+        |                                                     v
+        |                                       +-----------------------------+
+        |                                       |     Shadow Skill Layer      |
+        |                                       |        (SKILL.md)           |
+        |                                       +--------------+--------------+
+        |                                                      |
+        |  Interactive Terminal Commands                       | Non-interactive Shell Calls
+        |  (e.g., `shadow task add`)                           | (e.g., `shadow task add --json`)
+        +------------------------------+-----------------------+
+                                       |
+                                       v
++----------------------------------------------------------------------------------------+
+|                                     SHADOW CLI                                         |
+|                                                                                        |
+|   +---------------------------------------+  +-------------------------------------+   |
+|   | Human UX Layer                        |  | Machine / Agent UX Layer            |   |
+|   | - Rich Terminal Tables & Colors       |  | - Strict JSON Schema Outputs        |   |
+|   | - Interactive Prompts & Fuzzy Finder  |  | - Silent / Machine Exit Codes       |   |
+|   | - Terminal UI (TUI) Dashboard         |  | - Stdin Pipe Ingestion / Streaming  |   |
+|   +-------------------+-------------------+  +-------------------+-----------------+   |
+|                       |                                          |                     |
+|                       +--------------------+---------------------+                     |
+|                                            |                                           |
+|                                            v                                           |
+|   +--------------------------------------------------------------------------------+   |
+|   | Core Dispatcher & Validation Engine                                            |   |
+|   +--------------------------------------------------------------------------------+   |
++--------------------------------------------+-------------------------------------------+
+                                             |
+                                             v
++----------------------------------------------------------------------------------------+
+|                                SHADOW CORE ENGINE                                      |
+|                                                                                        |
+|   +---------------------------+  +------------------------+  +---------------------+   |
+|   | Task & Hierarchy Engine   |  | Mapping & Rollup Engine|  | Sync & State Engine |   |
+|   | - Epics / Stories / Tasks |  | - N:M Relational Graph |  | - Push / Pull / Diff|   |
+|   | - Custom States & Tags    |  | - Markdown Projections |  | - Conflict Resolver |   |
+|   | - Git Branch/Commit Links |  | - Rollup Summarizers   |  | - Offline Mutation  |   |
+|   | - Worktree Integration    |  | - Field Translators    |  |   Queue             |   |
+|   +-------------+-------------+  +-----------+------------+  +----------+----------+   |
+|                 |                            |                          |              |
+|                 +----------------------------+--------------------------+              |
+|                                              |                                         |
+|                                              v                                         |
+|   +--------------------------------------------------------------------------------+   |
+|   | Privacy & Sanitization Firewall (Redaction, field masking, noise stripping)    |   |
+|   +--------------------------------------------------------------------------------+   |
++----------------------------------------------+-----------------------------------------+
+                                               |
+                          +--------------------+--------------------+
+                          |                                         |
+                          v                                         v
+   LOCAL STORAGE SUBSYSTEM                             REMOTE CONNECTOR SUBSYSTEM
+   +------------------------------------+              +------------------------------------+
+   | - Embedded SQLite (WAL Mode)       |              | Pluggable Remote Connectors:       |
+   | - Flat-file YAML/Markdown Mirror   |              | - Atlassian Jira (REST v3 / ADF)   |
+   | - OS Keychain Credential Store     |              | - Linear Connector (GraphQL)       |
+   | - Offline Mutation Queue           |              | - GitHub Issues Connector (REST)   |
+   +------------------------------------+              | - Azure DevOps Connector (REST)    |
+                                                       +------------------------------------+
 ```
 
 ### 5.2 Key Subsystems
 
-#### 1. Task & Hierarchy Engine
-- Maintains the local entity graph: **Initiative $\rightarrow$ Epic $\rightarrow$ Story $\rightarrow$ Task $\rightarrow$ Subtask / Checklist**.
-- Flexible metadata schema: supports custom user-defined statuses, priorities, context tags, deadlines, branch names, and worktree associations.
-- Git Context Attachment: automatically binds current git commit hashes, branch names, and worktree paths (`wt`) to tasks.
+#### 1. The Shadow CLI & Machine Interface
+The CLI is the single entry point for all operations. It provides two operational modes:
+- **Interactive Human Mode:** Color-coded terminal tables, fuzzy searching, interactive prompts, and an optional TUI dashboard.
+- **Machine/Agent Mode (`--json`):** Emits strictly validated JSON schemas to `stdout`, operational logs to `stderr`, and uses explicit exit codes (`0` for success, non-zero for specific error types). Supports non-interactive confirmation flags (`--yes`, `--force`) and reading markdown payloads from files or `stdin`.
 
-#### 2. The $N \leftrightarrow M$ Mapping & Relationship Matrix
-- The foundational engine that maintains bidirectional links between local IDs (e.g. `SHADOW-42`, `local-task-88`) and remote keys (e.g. `JIRA-PROJ-1042`, `LINEAR-ENG-512`).
+#### 2. The Agent Skill Layer (`SKILL.md`)
+Rather than relying on RPC servers, agent intelligence is governed by standardized skill documentation:
+- Ingested directly by AI agents (Claude Code, Antigravity, Cursor).
+- Teaches the agent:
+  1. **Lifecycle Triggers:** When to query Shadow (session start, task pivots, git branch transitions, wrap-up).
+  2. **Decomposition Protocols:** How to take a high-level task and break it into atomic CLI additions (`shadow task add --parent ...`).
+  3. **Verification Standards:** Dual-verification criteria before marking tasks complete (unit tests + runtime verification).
+  4. **Anti-Bloat Discipline:** How to post append-only progress logs and avoid polluting remote trackers.
+
+#### 3. Task & Hierarchy Engine
+- Maintains the local entity graph: **Initiative $\rightarrow$ Epic $\rightarrow$ Story $\rightarrow$ Task $\rightarrow$ Subtask / Checklist**.
+- Flexible metadata schema: supports custom user-defined statuses, priorities, context tags, deadlines, branch names, and worktree associations (`wt`).
+- Git Context Attachment: automatically binds current git commit hashes, branch names, and worktree paths to tasks.
+
+#### 4. The $N \leftrightarrow M$ Mapping & Relationship Matrix
+- Maintains bidirectional links between local IDs (e.g. `SHADOW-42`, `local-task-88`) and remote keys (e.g. `JIRA-PROJ-1042`, `LINEAR-ENG-512`).
 - Supports arbitrary topological relationships:
   - **$N:1$ Rollup:** Multiple local tasks project into a single remote issue.
   - **$1:M$ Fan-out:** One local epic coordinates work distributed across multiple remote issues.
@@ -196,7 +261,7 @@ Autonomous coding agents (Antigravity, Cursor, Claude Code, Cline, Aider) execut
   - **$N:0$ Private:** Local-only tasks, spikes, and agent checklists that are intentionally never synced.
   - **$N:M$ Matrix:** Complex multi-component groupings.
 
-#### 3. Projection & Rollup Engine
+#### 5. Projection & Rollup Engine
 - Generates rendered artifacts for remote synchronization based on local task state.
 - **Rollup Summarizer:** When syncing $N$ local tasks to 1 Jira issue, creates a clean, formatted Markdown/ADF status comment or updates the Jira issue body checklist:
   ```markdown
@@ -210,14 +275,14 @@ Autonomous coding agents (Antigravity, Cursor, Claude Code, Cline, Aider) execut
   ```
 - **Field Translators:** Maps local statuses (e.g., `in_development`, `agent_evaluating`) to remote workflow transitions (e.g., `In Progress`, `Under Code Review`).
 
-#### 4. Privacy & Sanitization Firewall
+#### 6. Privacy & Sanitization Firewall
 - Acts as a zero-trust perimeter between the developer's machine and corporate servers.
 - **Rule Engine:**
   - Strips designated fields (e.g. `notes`, `scratchpad`, `agent_debug_log`, `internal_cost`).
   - Redacts sensitive patterns (tokens, IP addresses, proprietary URLs, local filesystem paths like `/Users/username/...`).
   - Enforces developer sign-off if configured (`shadow sync --dry-run` or interactive approval).
 
-#### 5. Offline Queue & Sync State Engine
+#### 7. Offline Queue & Sync State Engine
 - Maintains a local SQLite write-ahead log (WAL) of pending synchronization mutations.
 - Network-agnostic: if Jira is unreachable, mutations are queued chronologically.
 - Resolves conflicts using configurable strategies:
@@ -235,16 +300,16 @@ Autonomous coding agents (Antigravity, Cursor, Claude Code, Cline, Aider) execut
 * **FR1.3 Context Metadata:** Each task MUST support metadata attributes including: title, description, markdown body, tags, estimated/spent time, priority, target branch, associated worktree, and arbitrary key-value custom fields.
 * **FR1.4 Fast Full-Text Search:** Users and agents MUST be able to search tasks by keyword, tag, status, or date with sub-10ms latency across thousands of entries.
 
-### FR2: AI Agent Native Interface & MCP Integration
-* **FR2.1 Model Context Protocol (MCP) Server:** The system MUST provide an official MCP server exposing standard tools:
-  - `shadow_list_tasks(status, project, tag)`
-  - `shadow_get_task(task_id)`
-  - `shadow_create_task(title, type, parent_id, metadata)`
-  - `shadow_update_task(task_id, status, comment, checklist_updates)`
-  - `shadow_link_remote(local_id, remote_key, provider)`
-  - `shadow_get_active_context()`
-* **FR2.2 Machine-Readable CLI:** The CLI MUST support `--json` output on every command to enable scriptability and subagent consumption.
-* **FR2.3 Agent Concurrency Safety:** The storage engine MUST handle concurrent read/write transactions from multiple parallel subagents (e.g., Antigravity subagents or Cursor processes) without lock collisions or data corruption.
+### FR2: AI Agent Native Interface (CLI & Skills Architecture)
+* **FR2.1 Official Agent Skill Specification (`SKILL.md`):** The system MUST distribute a standardized, versioned `SKILL.md` that instructs any LLM agent on how to:
+  - Query tasks, inspect backlog, and select work items.
+  - Create atomic subtasks and spikes during planning.
+  - Record intermediate verification steps and test outputs.
+  - Apply dual-verification closure gates before marking work complete.
+* **FR2.2 Structured Machine Output (`--json`):** Every CLI command MUST support a `--json` flag producing consistent, machine-parseable JSON to `stdout` with errors to `stderr`.
+* **FR2.3 Non-Interactive Flags:** All state-modifying commands MUST support `--non-interactive` and `--yes` flags to prevent hanging prompts during autonomous agent execution.
+* **FR2.4 Batch & Stdin Processing:** The CLI MUST support ingesting markdown bodies and batch updates via `stdin` or file inputs (`--body-file <path>`), enabling agents to pass large task descriptions without shell escaping limits.
+* **FR2.5 Agent Concurrency Safety:** The storage engine MUST utilize SQLite WAL mode with immediate retry backoff to handle multiple parallel agents/subagents writing simultaneously without database locks.
 
 ### FR3: The $N \leftrightarrow M$ Mapping Engine
 * **FR3.1 Relational Linkage:** The system MUST permit associating any local entity with zero, one, or multiple remote entities, and vice versa.
@@ -264,7 +329,7 @@ Autonomous coding agents (Antigravity, Cursor, Claude Code, Cline, Aider) execut
   - **Atlassian Jira:** Jira Cloud and Jira Data Center (REST API v2/v3, ADF markdown converter).
   - **Linear:** Linear GraphQL API.
   - **GitHub Issues:** GitHub REST/GraphQL API.
-* **FR4.3 Ingestion / Pull:** The system MUST support pulling assigned remote tickets into a local inbox/backlog folder with automatic local entity creation.
+* **FR4.3 Ingestion / Pull:** The system MUST support pulling assigned remote tickets into a local inbox/backlog folder with automatic local entity creation (`shadow import jira:PROJ-123`).
 * **FR4.4 Ad-Hoc / Selective Push:**
   - Manual sync: `shadow sync push [task_id | project]`.
   - Event-driven sync: Git hooks on commit or push.
@@ -277,12 +342,13 @@ Autonomous coding agents (Antigravity, Cursor, Claude Code, Cline, Aider) execut
 * **FR5.3 Secure Credential Storage:** API tokens and credentials MUST NOT be stored in plain text configuration files; they MUST be stored in the OS Keychain or fetched via environment variables / secret managers.
 
 ### FR6: Developer Experience & CLI Tooling
-* **FR6.1 Intuitive Terminal CLI:** Ergonomic commands for human developers:
-  - `shadow init`: Initialize Shadow in a workspace or project.
-  - `shadow add "Fix cache invalidation bug" --parent EPIC-12`: Fast task creation.
-  - `shadow start <task_id>`: Set status to in-progress, checkout or bind git branch/worktree.
+* **FR6.1 Ergonomic CLI Commands:**
+  - `shadow init`: Initialize Shadow in a workspace or project repository.
+  - `shadow task add "Refactor auth middleware" --parent EPIC-12`: Fast task creation.
+  - `shadow task start <task_id>`: Set status to in-progress, checkout or bind git branch/worktree.
+  - `shadow task done <task_id>`: Verify checklist items and mark complete.
   - `shadow link <local_id> jira:PROJ-456`: Bind local task to remote Jira ticket.
-  - `shadow sync`: Synchronize local changes with configured remotes.
+  - `shadow sync [push|pull]`: Synchronize local changes with configured remotes.
   - `shadow status`: Visual summary of active tasks, linked remote tickets, and sync status.
 * **FR6.2 Interactive Terminal UI (TUI):** A fast, keyboard-driven terminal dashboard (built with Bubbletea / Ratatui) showing boards, task lists, and sync states.
 
@@ -322,7 +388,7 @@ erDiagram
         string id PK "e.g. corporate-jira"
         string provider "jira | linear | github"
         string base_url "https://company.atlassian.net"
-        string auth_type "api_token | bearer | oauth2"
+        string auth_type "keychain | env"
         json config "project keys, custom field mappings"
     }
 
@@ -396,10 +462,10 @@ The mapping between Local and Remote is represented as an explicit join entity (
 ### 8.1 Performance & Latency
 - **Local Read Latency:** Querying a task or listing 100 active tasks MUST complete in $< 10\text{ms}$.
 - **Local Write Latency:** Task creation, checklist ticking, and status updates MUST persist in $< 20\text{ms}$.
-- **Agent CLI Overhead:** `shadow` CLI invocations MUST complete execution and return JSON in $< 50\text{ms}$ on standard hardware.
+- **CLI Startup & Execution Overhead:** `shadow` CLI invocations MUST start, execute, and return output in $< 40\text{ms}$ on standard hardware.
 
 ### 8.2 Reliability & Fault Tolerance
-- **Zero Data Loss:** Local writes MUST be committed immediately to durable storage (SQLite with WAL or atomic file writes).
+- **Zero Data Loss:** Local writes MUST be committed immediately to durable storage (SQLite with WAL).
 - **Graceful Network Degradation:** Any sync operation that encounters timeouts, DNS failures, or 5xx server errors MUST gracefully save the outbound payload to the local offline mutation queue and exit with code 0 (queued) or non-blocking warning.
 
 ### 8.3 Security & Compliance
@@ -409,30 +475,30 @@ The mapping between Local and Remote is represented as an explicit join entity (
 
 ### 8.4 Portability & Environments
 - Native support for **macOS** (Darwin arm64/x86_64) and **Linux** (x86_64/arm64). Windows support via WSL2.
-- Standalone single-binary distribution (e.g. Go, Rust, or packaged Node binary) with zero required runtime dependencies.
+- Standalone single-binary distribution (e.g. Go, Rust) with zero required runtime dependencies or background server daemons.
 
 ---
 
 ## 9. User Journeys & End-to-End Scenarios
 
-### Scenario 1: Decomposing a Jira Story into Local Agent Tasks ($N \rightarrow 1$)
+### Scenario 1: Decomposing a Jira Story into Local Agent Tasks ($N \rightarrow 1$) via Skills & CLI
 
 ```
 [Corporate Jira]                                      [Developer Machine]
 Issue: AUTH-102                                      
 "Migrate Auth to OAuth2"                              
        |                                                     |
-       |  1. Pull / Import                                   |
+       |  1. Ingestion: `shadow import jira:AUTH-102`        |
        +---------------------------------------------------->|
-                                                             | 2. Agent Decomposes
-                                                             |    into 4 Local Tasks:
-                                                             |    - SHADOW-1: Spike spec
-                                                             |    - SHADOW-2: Token verifier
-                                                             |    - SHADOW-3: Refresh flow
-                                                             |    - SHADOW-4: E2E tests
+                                                             | 2. Agent reads `SKILL.md`
+                                                             |    and decomposes into 4 tasks:
+                                                             |    `shadow task add "Spike spec" --parent SHADOW-50 --json`
+                                                             |    `shadow task add "Token verifier" --parent SHADOW-50 --json`
+                                                             |    `shadow task add "Refresh flow" --parent SHADOW-50 --json`
+                                                             |    `shadow task add "E2E tests" --parent SHADOW-50 --json`
                                                              |
                                                              | 3. Dev & Agents execute
-                                                             |    tasks locally (fast)
+                                                             |    tasks locally (sub-10ms CLI)
                                                              |
                                                              | 4. `shadow sync push`
                                                              |    Rollup Engine generates
@@ -446,13 +512,14 @@ Jira Comment Added:
 1. **Morning Ingestion:** Developer runs `shadow import jira:AUTH-102`.
 2. **Local Expansion:** Shadow creates a local Epic `SHADOW-50 ("Migrate Auth to OAuth2")` linked to Jira `AUTH-102`.
 3. **Agentic Breakdown:** The developer opens Antigravity/Cursor and instructs: *"Decompose SHADOW-50 into execution steps."*
-4. The agent calls `shadow_create_task` 4 times via MCP, creating:
-   - `SHADOW-51`: Architectural spike & provider research
-   - `SHADOW-52`: Token verification middleware
-   - `SHADOW-53`: Refresh token rotation logic
-   - `SHADOW-54`: End-to-end integration tests
-5. **Execution:** The agent and developer work in an isolated worktree. As unit tests pass, the agent marks `SHADOW-51`, `52`, and `53` complete.
-6. **Corporate Sync:** When the developer commits their code or runs `shadow sync`, Shadow compiles the status of all 4 tasks, sanitizes the internal notes, and posts a single polished progress update comment to `AUTH-102`, ticking off the corresponding subtask checklist on the Jira issue.
+4. Guided by `SKILL.md`, the agent invokes `shadow task add` 4 times via terminal command execution:
+   - `shadow task add "Architectural spike & provider research" --parent SHADOW-50 --json` $\rightarrow$ `SHADOW-51`
+   - `shadow task add "Token verification middleware" --parent SHADOW-50 --json` $\rightarrow$ `SHADOW-52`
+   - `shadow task add "Refresh token rotation logic" --parent SHADOW-50 --json` $\rightarrow$ `SHADOW-53`
+   - `shadow task add "End-to-end integration tests" --parent SHADOW-50 --json` $\rightarrow$ `SHADOW-54`
+5. **Execution:** The agent and developer work in an isolated worktree. As unit tests pass, the agent marks tasks complete:
+   `shadow task done SHADOW-51 --comment "Spike spec verified against RFC 6749"`
+6. **Corporate Sync:** When the developer runs `shadow sync push` (or pushes to git), Shadow compiles the status of all 4 tasks, sanitizes the internal notes, and posts a single polished progress update comment to `AUTH-102`, ticking off the corresponding subtask checklist on the Jira issue.
 
 ---
 
@@ -463,8 +530,8 @@ Jira Comment Added:
    - `API-890` (Public API Team)
    - `DATA-230` (Data Platform Team)
 2. **Local Unified Initiative:** The developer creates a single local initiative in Shadow:
-   `shadow epic create "Unified OpenTelemetry Pipeline"`
-3. **Multi-Linking:**
+   `shadow task add "Unified OpenTelemetry Pipeline" --type epic`
+3. **Multi-Linking via CLI:**
    - `shadow link SHADOW-90 jira:CORE-512`
    - `shadow link SHADOW-90 jira:API-890`
    - `shadow link SHADOW-90 jira:DATA-230`
@@ -476,8 +543,9 @@ Jira Comment Added:
 ### Scenario 3: Private Spikes & Exploration ($N \rightarrow 0$)
 
 1. **Context:** A developer wants to explore an unapproved refactoring idea or debug a gnarly race condition. They don't know if the refactor will work or if it will be discarded.
-2. **Local Creation:** The developer creates `SHADOW-301: Spike on using Rust FFI for cryptographic hashing` with label `private: true`.
-3. **Agent Collaboration:** The agent runs multiple iterations, logging benchmarks, memory profiles, and failed attempts into the task comments locally.
+2. **Local Creation:** The developer creates `SHADOW-301: Spike on using Rust FFI for cryptographic hashing` with label `private: true`:
+   `shadow task add "Spike on using Rust FFI" --type spike --private`
+3. **Agent Collaboration:** The agent runs multiple iterations, logging benchmarks, memory profiles, and failed attempts into the task comments locally via `shadow task comment SHADOW-301 ...`.
 4. **Zero Enterprise Noise:** Because the task has no remote mapping, corporate Jira is completely untouched. If the spike fails, the developer archives it with full lessons learned preserved in their local Shadow repository for future reference.
 
 ---
@@ -546,23 +614,24 @@ firewall:
 +-----------------------------------------------------------------------------------+
 
 [Phase 1: Local Engine & Core CLI] (Weeks 1 - 4)
-* Embedded SQLite storage engine & ACID transaction models.
-* Comprehensive CLI (`shadow add`, `shadow list`, `shadow edit`, `shadow status`).
+* Embedded SQLite storage engine (WAL mode) & ACID transaction models.
+* Comprehensive CLI (`shadow task add`, `shadow task list`, `shadow task update`, `shadow status`).
+* Structured `--json` and `--quiet` outputs for agent/script execution.
 * Basic Git worktree and branch awareness.
 * Local-only task management with custom hierarchy.
 
-[Phase 2: Agent Protocol & MCP Server] (Weeks 5 - 7)
-* Standard Model Context Protocol (MCP) server for Shadow.
-* Integration with Antigravity, Claude Code, and Cursor.
-* Concurrency testing for multiple parallel agent workers.
-* Structured prompt injection (active task context).
+[Phase 2: Agent Skill Specification & Automation] (Weeks 5 - 7)
+* Standardized `SKILL.md` distribution (Antigravity & Claude Code compatible).
+* Proactive lifecycle triggers (session startup, task pivots, blocker registration, dual-verification wrap-up).
+* Subagent concurrency and file-locking stress testing.
+* Automated context injection helper (`shadow context --format agent-prompt`).
 
 [Phase 3: The N <-> M Engine & Jira Connector] (Weeks 8 - 11)
 * Jira Cloud REST v3 integration with OS Keychain credentials.
 * N:1 rollup generator (comment stream & checklist synchronization).
 * 1:M fan-out mapper.
 * Privacy & Sanitization firewall (regex redactor, field mask).
-* Offline mutation queue and background retry daemon.
+* Offline mutation queue and background retry mechanism.
 
 [Phase 4: Multi-Connector Ecosystem & Developer TUI] (Weeks 12 - 15)
 * Terminal User Interface (TUI) dashboard (interactive kanban/list).
@@ -578,9 +647,9 @@ firewall:
 |---|---|---|
 | **Developer Context-Switching Reduction** | > 70% decrease in browser-based Jira visits. | Self-reported survey & browser history sampling. |
 | **Administrative Tax Saved** | ~3 to 5 hours saved per developer per week. | Time-motion tracking of ticket creation/updating. |
-| **Agent Execution Efficiency** | 100% of agent task tracking completed without external API rate limits or auth delays. | MCP tool latency & error rate telemetry. |
+| **Agent CLI Execution Latency** | 99th percentile CLI invocation $< 40\text{ms}$. | Local benchmarking suite. |
+| **Agent Skill Compliance Rate** | > 95% adherence to dual-verification closure rules. | Automated audit of task completion events. |
 | **Sync Accuracy & Fidelity** | Zero enterprise compliance breaches (zero unredacted private tokens or internal scratch leaks). | Firewall redaction test suites & audit logs. |
-| **Local Response Latency** | 99th percentile CLI/MCP response time $< 25\text{ms}$. | Local benchmarking suite. |
 
 ---
 
