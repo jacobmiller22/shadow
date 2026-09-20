@@ -76,6 +76,35 @@ export const workerClaims = sqliteTable("worker_claims", {
   expiresAt: integer("expires_at", { mode: "number" }).notNull(),
 });
 
+export const remoteSchemaCache = sqliteTable("remote_schema_cache", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  remoteSystem: text("remote_system").notNull(), // jira, github
+  projectKey: text("project_key").notNull(),
+  schemaJson: text("schema_json").notNull(),
+  cachedAt: integer("cached_at", { mode: "number" }).notNull(),
+});
+
+export const remoteLinks = sqliteTable("remote_links", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  remoteSystem: text("remote_system").notNull(), // jira, github
+  remoteKey: text("remote_key").notNull(),       // PROJ-123, #42
+  remoteUrl: text("remote_url"),
+  lastSyncedAt: integer("last_synced_at", { mode: "number" }).notNull(),
+});
+
+export const syncAuditLog = sqliteTable("sync_audit_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  destination: text("destination").notNull(),
+  action: text("action").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  payload: text("payload").notNull(),
+  status: text("status").notNull(),
+  createdAt: integer("created_at", { mode: "number" }).notNull(),
+});
+
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type TaskRelation = typeof taskRelations.$inferSelect;
@@ -88,3 +117,9 @@ export type IdempotencyToken = typeof idempotencyTokens.$inferSelect;
 export type NewIdempotencyToken = typeof idempotencyTokens.$inferInsert;
 export type WorkerClaim = typeof workerClaims.$inferSelect;
 export type NewWorkerClaim = typeof workerClaims.$inferInsert;
+export type RemoteSchemaCache = typeof remoteSchemaCache.$inferSelect;
+export type NewRemoteSchemaCache = typeof remoteSchemaCache.$inferInsert;
+export type RemoteLink = typeof remoteLinks.$inferSelect;
+export type NewRemoteLink = typeof remoteLinks.$inferInsert;
+export type SyncAuditLog = typeof syncAuditLog.$inferSelect;
+export type NewSyncAuditLog = typeof syncAuditLog.$inferInsert;

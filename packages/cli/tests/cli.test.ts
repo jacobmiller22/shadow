@@ -128,4 +128,40 @@ describe("Milestone 0 & 1 CLI Tests", () => {
     expect(children.length).toBe(4);
     expect(children[0].parentId).toBe("SHD-0001");
   });
+
+  test("Milestone 3 CLI: link, sync, and audit commands", () => {
+    runCli(["task", "add", '"Jira Linked Task"']);
+    
+    // Link command
+    const linkOut = runCli(["link", "SHD-0001", "jira:ENG-101", "--json"]);
+    const linkObj = JSON.parse(linkOut);
+    expect(linkObj.success).toBe(true);
+    expect(linkObj.link.remoteKey).toBe("ENG-101");
+
+    // Task links list
+    const linksOut = runCli(["task", "links", "SHD-0001", "--json"]);
+    const linksArr = JSON.parse(linksOut);
+    expect(linksArr.length).toBe(1);
+    expect(linksArr[0].remoteKey).toBe("ENG-101");
+
+    // Sync dry-run command
+    const drySyncOut = runCli(["sync", "--dry-run", "--json"]);
+    const dryObj = JSON.parse(drySyncOut);
+    expect(dryObj.dryRun).toBe(true);
+
+    // Sync execution command
+    const syncOut = runCli(["sync", "--json"]);
+    const syncObj = JSON.parse(syncOut);
+    expect(syncObj.success).toBe(true);
+
+    // Audit command
+    const auditOut = runCli(["audit", "--json"]);
+    const auditArr = JSON.parse(auditOut);
+    expect(Array.isArray(auditArr)).toBe(true);
+
+    // Unlink command
+    const unlinkOut = runCli(["unlink", "SHD-0001", "jira:ENG-101", "--json"]);
+    const unlinkObj = JSON.parse(unlinkOut);
+    expect(unlinkObj.success).toBe(true);
+  });
 });

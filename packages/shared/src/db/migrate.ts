@@ -91,6 +91,44 @@ export class MigrationsEngine {
       CREATE INDEX IF NOT EXISTS idx_claims_task ON worker_claims(task_id);
       CREATE INDEX IF NOT EXISTS idx_claims_expires ON worker_claims(expires_at);
 
+      -- Remote schema cache table (SHD-JIRA-001)
+      CREATE TABLE IF NOT EXISTS remote_schema_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remote_system TEXT NOT NULL,
+        project_key TEXT NOT NULL,
+        schema_json TEXT NOT NULL,
+        cached_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_schema_cache_proj ON remote_schema_cache(remote_system, project_key);
+
+      -- Remote issue linkages table (SHD-JIRA-005)
+      CREATE TABLE IF NOT EXISTS remote_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        remote_system TEXT NOT NULL,
+        remote_key TEXT NOT NULL,
+        remote_url TEXT,
+        last_synced_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_remote_links_task ON remote_links(task_id);
+      CREATE INDEX IF NOT EXISTS idx_remote_links_key ON remote_links(remote_system, remote_key);
+
+
+      -- Sync audit log table (SHD-SYNC-013)
+      CREATE TABLE IF NOT EXISTS sync_audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        destination TEXT NOT NULL,
+        action TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sync_audit_dest ON sync_audit_log(destination);
+
       -- FTS5 Full-Text Search Virtual Table
       CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
         id UNINDEXED,
