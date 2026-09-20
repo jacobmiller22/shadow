@@ -1,342 +1,291 @@
-# Shadow MVP Strategic Roadmap & Architecture Specification
+# Shadow MVP Strategic Roadmap & Architecture Specification (Hardened v2.0)
 
-**Document Version:** 1.0.0  
+**Document Version:** 2.0.0  
 **Target Milestone:** Initial Minimum Viable Product (MVP)  
 **Execution Lead:** Jacob Miller & Antigravity  
 **Stack Alignment:** Local-First TypeScript/Bun CLI Engine + Cloudflare Edge Ecosystem (Workers, D1, Queues, Pages)  
 
 ---
 
-## Executive Summary
+## Executive Summary & What Changed in v2.0
 
-This document establishes the end-to-end execution roadmap and low-level architectural specification for **Shadow**—a local-first developer project management system and enterprise sync bridge.
+Following a comprehensive senior architectural review, the initial 25-ticket roadmap was audited for naive assumptions, production environment contamination risks, and operational blindspots.
 
-The design was hardened through **five rigorous expert iteration loops** across five core disciplines:
+### Core Additions in v2.0:
+1. **Multi-Environment Isolation & Safe Dogfooding:** Strict separation of `local-dev`, `local-test`, and `local-prod` databases. Prevents engineers developing Shadow *from* corrupting their actual daily personal task tracking database.
+2. **Multi-Worktree Concurrency Architecture:** Support for Worktrunk (`wt`) where multiple parallel branches/worktrees operate simultaneously without SQLite locking collisions or cross-branch task bleed.
+3. **Atlassian Token Rotation Race-Condition Prevention:** Distributed locking in Cloudflare KV to prevent concurrent CLI/Worker operations from bricking Atlassian refresh tokens (which rotate on single use).
+4. **Dynamic Jira Schema & Custom Field Discovery:** Moving away from hardcoded Jira fields to dynamic introspection of `createmeta` and `editmeta` with fallback default resolvers.
+5. **Agent Idempotency Engine:** Deterministic deduplication and idempotency keys to prevent LLM agents from creating duplicate tasks during retries or truncated turns.
+6. **Disaster Recovery & SQLite Checkpointing:** WAL checkpoint management, automatic SQLite backup snapshots before remote sync, and corruption recovery hooks.
+7. **Expanded Granular Backlog:** Decomposed from 25 coarse epics into **64 atomic, shovel-ready engineering tickets** across Milestones M0 through M4.
+
+---
+
+## Section 1: Senior Architectural Review & Blindspot Analysis
+
+A panel of 6 senior specialists convened to stress-test the initial architecture:
 1. **Dr. Aris Thorne** — Principal Distributed Systems & Local-First Architect
 2. **Kavita Patel** — Principal AI Agent & Tooling Architect
 3. **Marcus Vance** — Cloudflare Edge & Serverless Architect
 4. **Elena Rostova** — Principal Enterprise Systems & Jira Integration Specialist
-5. **David Sterling** — Senior Staff Technical Program Manager & Delivery Lead
-
-### Key Strategic Decisions:
-- **Zero Daemon, CLI + Skills Protocol:** No background MCP server or complex IPC middleware. Agents operate via standardized `SKILL.md` instructions invoking the deterministic `shadow` CLI with structured `--json` output.
-- **Unified TypeScript/Drizzle Architecture:** Shared data models, validation schemas (Zod), and business logic across both the **Local CLI** (running on embedded SQLite) and the **Cloudflare Edge** (running on Cloudflare D1). This achieves 100% schema parity and eliminates throwaway code.
-- **The Cloudflare Edge Bridge:** Cloudflare Workers, D1, and Queues serve as an asynchronous edge relay for Jira OAuth 3LO token exchanges, Jira webhook ingestion, and cross-machine synchronization mailboxes, keeping the developer's local workstation isolated and private.
-- **Phased Delivery (M0 - M4):** Every milestone is fully functional and delivers immediate developer utility without throwaway throw-ins.
-
----
-
-## Section 1: The 5 Expert Iteration Loops
+5. **Samira Chen** — Staff DevOps & Infrastructure Architect
+6. **David Sterling** — Senior Staff Technical Program Manager & Delivery Lead
 
 ```
 +-----------------------------------------------------------------------------------------+
-|                                EXPERT REVIEW PANEL LOOPS                                |
+|                                SENIOR BLINDSPOT AUDIT                                   |
 +-----------------------------------------------------------------------------------------+
-|  Loop 1: Architectural Topology (Edge-Assisted Local-First + Cloudflare Stack)         |
-|  Loop 2: Data Models, Schema Harmonization (SQLite <-> D1) & N:M Mapping Mechanics      |
-|  Loop 3: Developer & Agent Interfaces (Deterministic CLI & SKILL.md Protocol)           |
-|  Loop 4: Milestone Staging, Delivery Phasing & Risk Mitigation                          |
-|  Loop 5: Shovel-Ready Ticket Decomposition & Dependency Sequencing                      |
+|  Blindspot 1: Multi-Worktree Concurrency & Local Environment Cross-Contamination       |
+|  Blindspot 2: Atlassian OAuth Single-Use Refresh Token Invalidation Race Conditions     |
+|  Blindspot 3: Enterprise Jira Dynamic Schema Drift & Mandatory Custom Fields            |
+|  Blindspot 4: Cloudflare D1 Zero-Downtime Migration & Staging/Prod Pipeline             |
+|  Blindspot 5: AI Agent Turn Retries & Unintended Task Duplication (Idempotency)        |
+|  Blindspot 6: Local SQLite Corruption, Crash Recovery & WAL Bloat                       |
 +-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-### Loop 1: Architectural Topology & The Cloudflare Edge Role
+### Detailed Blindspot Resolutions
 
-#### 1.1 The Debate
-* **Dr. Thorne (Local-First):** "Shadow must remain 100% functional with zero internet connectivity. If the developer is on an airplane or behind a restrictive corporate firewall, every task command (`add`, `start`, `done`, `comment`) must execute in under 15ms. The cloud must never be in the critical path of local work."
-* **Marcus Vance (Cloudflare Edge):** "Agreed on local autonomy. But connecting a local CLI directly to Jira has severe pain points:
-  1. **OAuth 2.0 3LO:** Jira requires an HTTPS redirect URI for OAuth. A local CLI cannot easily host a public HTTPS endpoint without tunnels like ngrok.
-  2. **Jira Webhook Ingestion:** When teammates update Jira tickets, we need to capture those webhooks. Your laptop cannot accept inbound Jira webhooks when sleeping or behind NAT.
-  3. **Multi-Machine Continuity:** Developers switch between desktops, laptops, and remote dev servers.
-  Cloudflare Workers + D1 + Queues gives us a globally distributed, serverless Edge Bridge that acts as an OAuth broker, webhook aggregator, and sync mailbox."
-* **Elena Rostova (Enterprise Jira):** "Jira Cloud REST API rate limits are aggressive (often throttled per tenant). If multiple agent subtasks hammer Jira directly from the client, the developer's IP will get blocked. The Cloudflare Edge layer can throttle and queue outbound requests using Cloudflare Queues."
+#### Blindspot 1: Multi-Worktree Concurrency & Local Dogfooding Contamination
+* **The Problem (Samira Chen & Dr. Thorne):** When developing Shadow, engineers run test suites, feature branches, and debug builds. If the local development binary writes to the default database (`~/.local/share/shadow/shadow.db`), a failed unit test or experimental schema migration will corrupt or wipe the developer's real, in-flight personal task database. Furthermore, modern development relies on Git worktrees (`wt`): a developer might have 3 worktrees active (`wt switch feature-auth`, `wt switch fix-cache`, etc.). If task state is naive, tasks will cross-bleed between branches.
+* **The Resolution (ADR-002):**
+  1. **Strict Tri-Tier Environment Scoping:**
+     - `production`: `~/.local/share/shadow/shadow.db` (Standard production CLI usage).
+     - `development`: `./.shadow-dev/shadow.db` (Local development when hacking on Shadow).
+     - `test`: In-memory SQLite (`:memory:`) or ephemeral temp file cleaned up after test run.
+     - Controlled via `SHADOW_ENV` and explicit `--db-path` override flag.
+  2. **Worktree Multi-Tenancy & Git Root Hash Binding:**
+     - Every task stores a `workspace_id` derived from the canonical Git repository root hash.
+     - When inside a worktree, `shadow` automatically scopes listings and active task lookups to the current Git repository root and branch, while retaining the ability to query globally via `--all-workspaces`.
+  3. **SQLite WAL Concurrency Tuning:**
+     - SQLite `busy_timeout` set to 10,000ms with random exponential backoff jitter (10ms - 250ms).
+     - Automatic WAL checkpointing triggered every 1,000 pages (`PRAGMA wal_autocheckpoint = 1000`) and during clean CLI exit.
 
-#### 1.2 The Resolution & Architecture Decision Record (ADR-001)
-* **Status:** Approved
-* **Decision:** Implement a **Hybrid Edge-Assisted Local-First Architecture**.
-  - **Local Core (Workstation):** Embedded SQLite with WAL mode. CLI compiles to a single standalone binary via Bun. All local CRUD operations execute locally against SQLite with 0ms network latency.
-  - **Cloudflare Edge Bridge (`shadow-edge`):**
-    - **Cloudflare Workers:** Edge API handling OAuth 3LO token dance with Atlassian, JWT session validation, and webhook dispatch.
-    - **Cloudflare D1:** Edge SQLite database storing synced remote issue mirrors, mapping tables, and user sync mailboxes.
-    - **Cloudflare Queues:** Buffers inbound Jira webhooks and outbound batch updates, smoothing rate limits.
-    - **Cloudflare Pages / Workers Assets:** Hosts an optional, read-only developer dashboard for team stakeholders.
-  - **Communication:** Local CLI connects to `shadow-edge` over authenticated HTTPS using an API key stored in the OS Keychain. Sync is strictly ad-hoc and on-demand (`shadow sync`).
+#### Blindspot 2: Atlassian OAuth Single-Use Refresh Token Invalidation Race Conditions
+* **The Problem (Elena Rostova & Marcus Vance):** Atlassian's OAuth 2.0 3LO implementation uses **rotating refresh tokens**. When a refresh token is exchanged for a new access token, the old refresh token is invalidated immediately. If the local CLI issues a sync request while an incoming Cloudflare Worker webhook handler is also refreshing the token, both will present the same old refresh token. One will succeed; the other will receive `400 invalid_grant`, which Atlassian treats as token theft, permanently revoking all tokens for that user!
+* **The Resolution (ADR-003):**
+  1. **Centralized Token Authority on Cloudflare Workers:**
+     - The local CLI *never* directly handles or rotates Atlassian OAuth tokens.
+     - All Jira API requests are routed through `shadow-edge` or obtain short-lived scoped Bearer tokens issued by the Cloudflare Worker.
+  2. **Distributed Refresh Mutex:**
+     - Token refresh operations inside `shadow-edge` acquire an atomic lock in Cloudflare KV (`lock:refresh:<user_id>`) with a 15-second TTL.
+     - A 60-second grace-period token cache is maintained in KV: if a concurrent request arrives during rotation, it receives the freshly generated access token from KV rather than attempting a duplicate rotation against Atlassian.
+
+#### Blindspot 3: Enterprise Jira Dynamic Schema Drift & Mandatory Custom Fields
+* **The Problem (Elena Rostova):** Enterprise Jira instances are heavily customized. Jira administrators frequently add mandatory custom fields (e.g. `customfield_10024: "Root Cause"`, `customfield_10031: "Component/s"`, or custom approval workflow validators). If Shadow assumes standard Jira fields (`summary`, `description`, `issuetype`), every ticket creation or transition will fail with `400 Bad Request: Field X is required`.
+* **The Resolution (ADR-004):**
+  1. **Dynamic Schema Introspection:**
+     - On project linkage (`shadow link project jira:PROJ`), Shadow queries Jira's `GET /rest/api/3/issue/createmeta?projectKeys=PROJ&expand=projects.issuetypes.fields`.
+     - It caches required field metadata, types, and allowed values in the local database (`remote_schema_cache`).
+  2. **Interactive & Default Field Resolvers:**
+     - The developer can define static default values in `shadow.yaml`:
+       ```yaml
+       remotes:
+         jira:
+           field_defaults:
+             customfield_10024: { value: "Engineering Improvement" }
+             components: [{ name: "Core Infrastructure" }]
+       ```
+     - If an unmapped mandatory field is encountered during sync, the CLI prompts the user interactively (in human mode) or queues a structured validation request (in agent mode).
+
+#### Blindspot 4: Cloudflare D1 Zero-Downtime Migration & Staging/Prod Pipeline
+* **The Problem (Samira Chen & Marcus Vance):** Cloudflare D1 migrations execute directly against edge SQLite instances. If a migration alters a table while an active sync request is processing, it could cause write locks. Furthermore, rolling out edge changes without a staging environment risks breaking all developer CLI instances globally.
+* **The Resolution (ADR-005):**
+  1. **Dual Cloudflare Environments (`staging` vs `production`):**
+     - Managed in `packages/edge/wrangler.toml` via `[env.staging]` and `[env.production]`.
+     - Separate D1 database bindings: `shadow-edge-staging-d1` and `shadow-edge-prod-d1`.
+     - Separate Queues: `jira-webhooks-staging` and `jira-webhooks-prod`.
+  2. **Additive-Only Schema Migrations:**
+     - D1 migrations must follow expand-and-contract patterns: columns are added as nullable, code is deployed to read new and write both, and deprecated columns are removed only in subsequent releases.
+  3. **Automated Preview Deployments:** GitHub Actions automatically provisions ephemeral preview workers on pull requests using Wrangler.
+
+#### Blindspot 5: AI Agent Turn Retries & Unintended Task Duplication
+* **The Problem (Kavita Patel):** LLM agents run in asynchronous tool loops. If an agent executes `shadow task add "Implement auth cache"` and the model's turn times out or gets truncated, the agent's retry logic will rerun the command, creating duplicate tasks.
+* **The Resolution (ADR-006):**
+  1. **Deterministic Idempotency Keys:**
+     - Support `--idempotency-key <string>` on all creation commands (`task add`, `task comment`, `task link`).
+     - If no key is provided by an agent, Shadow computes an idempotency hash: `SHA256(workspace_id + parent_id + title + date_bucket)`.
+     - If an identical task creation request is received within a 1-hour window, Shadow returns the existing task object with status `200 OK` (deduplicated) rather than inserting a duplicate record.
+
+#### Blindspot 6: Local SQLite Corruption, Crash Recovery & WAL Bloat
+* **The Problem (Dr. Thorne):** Laptops crash, run out of battery, or undergo forced reboots. If SQLite WAL mode is not checkpointed regularly, the WAL file (`shadow.db-wal`) can grow to gigabytes, degrading read performance. In worst-case scenarios, power cuts during un-synced writes can leave SQLite in a recovery state.
+* **The Resolution (ADR-007):**
+  1. **Pre-Sync Atomic Database Snapshots:**
+     - Before every push sync operation, Shadow uses SQLite's Online Backup API (`sqlite3_backup`) to snapshot `shadow.db` to `~/.local/share/shadow/backups/shadow_backup_<timestamp>.db`. Backups are pruned to retain the last 7 daily snapshots.
+  2. **Automated Integrity Check:**
+     - On CLI startup, if an unclean shutdown is detected (e.g. stale lock or dirty flag), the CLI runs `PRAGMA integrity_check`.
+     - If corruption is detected, it automatically recovers from the latest valid snapshot and notifies the developer.
+
+---
+
+## Section 2: Architectural Blueprints & System Topologies
+
+### 2.1 Multi-Environment Scoping Diagram
 
 ```
-+-----------------------------------------------------------------------------------+
-|                           LOCAL DEVELOPER WORKSPACE (OFFLINE)                     |
-|                                                                                   |
-|   +-------------------+      +------------------------------------------+         |
-|   | Human Developer   |      |  AI Coding Agents (Antigravity/Cursor)   |         |
-|   +---------+---------+      +--------------------+---------------------+         |
-|             |                                     |                               |
-|             |                                     | Reads `SKILL.md`              |
-|             v                                     v                               |
-|   +-------------------------------------------------------------------+           |
-|   |                        SHADOW CLI (Bun Binary)                    |           |
-|   +---------------------------------+---------------------------------+           |
-|                                     | Sub-10ms Reads/Writes                       |
-|                                     v                                             |
-|   +-------------------------------------------------------------------+           |
-|   |                    LOCAL STORAGE (SQLite WAL)                     |           |
-|   |   - tasks, epics, spikes, events, mappings, offline_queue         |           |
-|   +---------------------------------+---------------------------------+           |
-+-------------------------------------|---------------------------------------------+
-                                      |
-                                      | Ad-hoc Push/Pull (`shadow sync`)
-                                      | Authenticated TLS / Bearer Token
-                                      v
-+-----------------------------------------------------------------------------------+
-|                        CLOUDFLARE EDGE BRIDGE (`shadow-edge`)                     |
-|                                                                                   |
-|   +---------------------------------------------------------------------------+   |
-|   | Cloudflare Workers (OAuth 3LO Broker, Webhook Ingestion, Auth Gateway)    |   |
-|   +-----------------------+-----------------------------+---------------------+   |
-|                           |                             |                         |
-|                           v                             v                         v
-|   +-------------------------------+   +-----------------------------+   +---------+
-|   | Cloudflare D1 (Edge SQLite)   |   | Cloudflare Queues           |   | Pages UI|
-|   | - Remote Issue Mirror Cache   |   | - Webhook Ingestion Buffer  |   | (Viewer)|
-|   | - Mapping Registry            |   | - Rate-limited Sync Worker  |   +---------+
-|   +-------------------------------+   +--------------+--------------+             |
-+------------------------------------------------------|----------------------------+
-                                                       |
-                                                       | Filtered & Sanitized API
-                                                       v
-+-----------------------------------------------------------------------------------+
-|                           ENTERPRISE JIRA CLOUD (REMOTE)                          |
-+-----------------------------------------------------------------------------------+
++----------------------------------------------------------------------------------------+
+|                            MULTI-ENVIRONMENT ISOLATION MATRIX                          |
++----------------------------------------------------------------------------------------+
+
+  ENVIRONMENT: PRODUCTION (End-User Dev Work)
+  +------------------------------------------------------------------------------------+
+  | Path: ~/.local/share/shadow/shadow.db                                              |
+  | Edge: https://edge.shadow.dev (Production Worker + Prod D1)                        |
+  | Keyring: shadow-cli-prod-token                                                     |
+  +------------------------------------------------------------------------------------+
+
+  ENVIRONMENT: DEVELOPMENT (Developing on Shadow itself)
+  +------------------------------------------------------------------------------------+
+  | Path: <repo-root>/.shadow-dev/shadow.db (Git-ignored)                              |
+  | Edge: http://localhost:8787 or https://staging-edge.shadow.dev                     |
+  | Keyring: shadow-cli-dev-token                                                      |
+  +------------------------------------------------------------------------------------+
+
+  ENVIRONMENT: TEST (Unit & Integration Tests)
+  +------------------------------------------------------------------------------------+
+  | Path: :memory: or /tmp/shadow-test-<uuid>.db (Ephemeral)                           |
+  | Edge: Mock Service Worker (MSW) or Miniflare In-Memory D1                          |
+  | Keyring: Mock In-Memory Keyring                                                    |
+  +------------------------------------------------------------------------------------+
+```
+
+### 2.2 Cloudflare DevOps & Deployment Pipeline
+
+```
++-----------------------------------------------------------------------------------------+
+|                       CLOUDFLARE EDGE CI/CD PIPELINE (GITHUB ACTIONS)                   |
++-----------------------------------------------------------------------------------------+
+
+  [Pull Request Opened]
+         |
+         v
+  [1. Lint, Typecheck & Vitest]
+         |
+         v
+  [2. Miniflare Local D1 Migration Test]
+         |
+         v
+  [3. Ephemeral Cloudflare Preview Deployment] (Wrangler PR Preview Worker)
+         |
+         v
+  [4. E2E Agent & CLI Integration Test against Preview]
+         |
+         v
+  [Merge to Main]
+         |
+         v
+  [5. Deploy to Staging Environment] (D1 Staging Migration -> Worker Staging)
+         |
+         v
+  [6. Smoke Tests & Verification]
+         |
+         v
+  [7. Production Release Gate] (Zero-Downtime D1 Prod Migration -> Worker Prod)
 ```
 
 ---
 
-### Loop 2: Data Models, Schema Harmonization & $N \leftrightarrow M$ Mapping Mechanics
-
-#### 2.1 The Debate
-* **Elena Rostova (Enterprise Jira):** "In Jira, an Epic contains Stories, and Stories have Subtasks. But developers don't work in rigid 3-level hierarchies. They have spikes, investigative threads, subagent checklists, and cross-cutting refactors. How do we model $N \leftrightarrow M$ without creating an incomprehensible graph?"
-* **Dr. Thorne (Distributed Systems):** "Every entity in Shadow should be a polymorphic `TaskNode` with a recursive `parent_id`, a `type` (`epic`, `story`, `task`, `spike`, `subtask`), and a directed DAG edge table for non-hierarchical relationships (`blocks`, `relates_to`). For the mapping table, we decouple local IDs from remote keys via an explicit join table: `remote_mappings`."
-* **Marcus Vance (Cloudflare Edge):** "Because both local storage (SQLite) and Cloudflare Edge (D1) use the SQLite SQL dialect, we can use **Drizzle ORM** with TypeScript. We write our schema definitions once. The exact same migration scripts and query builders execute locally and at the edge."
-
-#### 2.2 The Resolution & Schema Specification
-* **Status:** Approved
-* **Decision:** Implement single-source-of-truth TypeScript schemas via Drizzle ORM.
-
-```typescript
-// Core Local & Edge Schema (Drizzle SQLite / D1 compatible)
-
-export const tasks = sqliteTable('tasks', {
-  id: text('id').primaryKey(), // e.g., 'SHD-101' or ULID
-  projectId: text('project_id').notNull(),
-  parentId: text('parent_id'), // Self-referencing recursive hierarchy
-  title: text('title').notNull(),
-  description: text('description').default(''),
-  type: text('type', { enum: ['epic', 'story', 'task', 'spike', 'subtask'] }).notNull().default('task'),
-  status: text('status', { enum: ['backlog', 'todo', 'in_progress', 'review', 'blocked', 'done'] }).notNull().default('todo'),
-  priority: integer('priority').notNull().default(3), // 1 (highest) - 5 (lowest)
-  isPrivate: integer('is_private', { mode: 'boolean' }).notNull().default(false), // Firewall flag
-  gitBranch: text('git_branch'),
-  gitWorktree: text('git_worktree'),
-  metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
-});
-
-export const remoteMappings = sqliteTable('remote_mappings', {
-  id: text('id').primaryKey(),
-  localTaskId: text('local_task_id').references(() => tasks.id, { onDelete: 'cascade' }).notNull(),
-  remoteSystem: text('remote_system').notNull(), // 'jira', 'linear', 'github'
-  remoteKey: text('remote_key').notNull(), // e.g., 'PROJ-1042'
-  relationType: text('relation_type', { enum: ['tracks', 'subtask_of', 'blocks', 'relates_to'] }).notNull().default('tracks'),
-  rollupPolicy: text('rollup_policy', { mode: 'json' }).$type<{
-    strategy: 'checklist_comment' | 'status_only' | 'description_checklist';
-    format?: string;
-  }>(),
-  lastSyncedAt: integer('last_synced_at', { mode: 'timestamp' }),
-  lastSyncedHash: text('last_synced_hash'),
-});
-
-export const syncQueue = sqliteTable('sync_queue', {
-  id: text('id').primaryKey(),
-  localTaskId: text('local_task_id'),
-  operation: text('operation', { enum: ['push_task', 'push_comment', 'transition', 'link'] }).notNull(),
-  payload: text('payload', { mode: 'json' }).notNull(),
-  attempts: integer('attempts').notNull().default(0),
-  lastError: text('last_error'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-});
-```
-
----
-
-### Loop 3: Developer & Agent Interfaces (Deterministic CLI & `SKILL.md`)
-
-#### 3.1 The Debate
-* **Kavita Patel (AI Agent Architect):** "Agents don't parse ANSI terminal colors or interactive prompts. When an agent runs `shadow task list`, it needs deterministic JSON on `stdout`. If a command fails, `stderr` must contain a structured JSON error object with a numeric error code, and the process must exit with a non-zero exit code."
-* **David Sterling (TPM / Delivery Lead):** "Human developers still need an enjoyable CLI experience: colorful tables, interactive pickers, and quick aliases. How do we serve both without maintaining two separate binaries?"
-* **Kavita Patel:** "Auto-detection plus explicit flags. If `stdout` is a TTY and no `--json` flag is provided, render human-friendly interactive tables. If `!isatty(stdout)` or `--json` is specified, emit raw, machine-readable JSON. Furthermore, every state-modifying command must accept `--non-interactive` or `-y` to guarantee an agent is never blocked on a confirmation prompt."
-* **Dr. Thorne:** "What about large inputs? Passing large markdown task specifications via bash flags can hit argument length limits or escaping issues. The CLI must support reading from `stdin` (`shadow task add --body -`) or from a file (`--body-file <path>`)."
-
-#### 3.2 The Resolution & Interface Standards
-* **Status:** Approved
-* **Decision:**
-  - Standardized CLI syntax: `shadow <domain> <action> [args] [flags]`.
-  - Machine contracts: `--json`, `--quiet`, `--non-interactive`, `--body-file`, `--stdin`.
-  - Exit Codes: `0` = Success, `1` = General Error, `2` = Validation Error, `3` = Conflict Detected, `4` = Network/Auth Error (queued locally).
-  - Agent Skill Protocol (`SKILL.md`): Ships directly in the repository and global agent paths (`~/.gemini/config/skills/shadow/SKILL.md` and `.claude/plugins`).
-
----
-
-### Loop 4: Milestone Staging & Delivery Phasing (No Throwaway Work)
-
-#### 4.1 The Debate
-* **David Sterling (TPM):** "We cannot afford throwaway code. If we build a throwaway mock sync layer in Phase 1 that we rewrite in Phase 3, we fail. Every milestone must be additive and production-grade."
-* **Marcus Vance (Cloudflare):** "We shouldn't delay local developer value while setting up Cloudflare Workers. Milestone 0 and 1 must give the developer a functioning, world-class local task engine. Then Milestone 2 introduces the Cloudflare Edge Bridge. Milestone 3 wires the $N \leftrightarrow M$ sync engine between the local DB and the Edge."
-* **Elena Rostova (Enterprise Jira):** "Jira ADF (Atlassian Document Format) is notoriously tricky. Building an ADF converter from scratch can take weeks. We should isolate the Markdown $\leftrightarrow$ ADF transformer in Milestone 3 as a pure functional module with comprehensive unit tests."
-
-#### 4.2 The Resolution: 5 Phased Milestones (M0 - M4)
+## Section 3: Phased Milestone Staging (M0 - M4)
 
 ```
 +-----------------------------------------------------------------------------------------+
 |                                    DELIVERY MILESTONES                                  |
-+-----------------------------------------------------------------------------------------+
-
-  [M0: Local Storage Engine & CLI Foundation] (Foundation)
-  - Embedded SQLite database with Drizzle ORM & WAL mode.
-  - Core CLI binary compiled via Bun (`shadow task add`, `list`, `edit`, `done`, `status`).
-  - Strict human vs `--json` agent output modes. Git context binding (branch/commit).
-
-  [M1: Agent Skill Protocol & Context Engine] (Agent-Native)
-  - Production `SKILL.md` with proactive triggers (session start, task pivot, dual verification).
-  - Scratchpad drafting flow, subagent concurrency test harness.
-  - Active task context injection (`shadow context --format prompt`).
-
-  [M2: Cloudflare Edge Bridge] (Cloud Infrastructure)
-  - Cloudflare Worker API (`shadow-edge`) with Wrangler configuration.
-  - Cloudflare D1 database initialized with synchronized schema.
-  - Cloudflare Queues for webhook buffering. Atlassian OAuth 3LO broker.
-
-  [M3: N <-> M Mapping, Rollup & Jira Connector] (Core Differentiator)
-  - Arbitrary N:M relational mapping engine.
-  - Rollup summarizer (Markdown & ADF comment generator, checklist updater).
-  - Privacy & Sanitization Firewall (redaction engine).
-  - Ad-hoc bi-directional sync (`shadow sync push/pull`) with offline fallback.
-
-  [M4: Developer TUI & Cloudflare Edge Web Dashboard] (Polish & Visibility)
-  - Terminal User Interface (TUI) interactive dashboard for fast keyboard navigation.
-  - Cloudflare Pages / Workers read-only web viewer for stakeholders.
-  - Complete documentation and installer scripts.
-```
-
----
-
-### Loop 5: Hardening the Ticket Decomposition & Execution Plan
-
-#### 5.1 The Review
-* **David Sterling (TPM):** "To make this shovel-ready, every ticket must have clear technical bounds, explicit acceptance criteria, and zero ambiguity about dependencies. No ticket should exceed 2-3 engineering days."
-* **All Experts:** Reviewed and approved the 25 granular engineering specifications in Section 3 of this document.
-
----
-
-## Section 2: Architectural Blueprints & Technical Specifications
-
-### 2.1 The Local CLI Core
-- **Runtime & Compilation:** TypeScript executed and compiled into a single static binary using **Bun** (`bun build --compile --minify --target=bun-darwin-arm64 ./src/cli.ts --outfile shadow`).
-- **Database Engine:** Embedded SQLite via `better-sqlite3` or Bun's native `bun:sqlite` with:
-  ```sql
-  PRAGMA journal_mode = WAL;
-  PRAGMA synchronous = NORMAL;
-  PRAGMA foreign_keys = ON;
-  PRAGMA busy_timeout = 5000;
-  ```
-- **Performance Budget:**
-  - Cold startup to `--json` output: $< 25\text{ms}$.
-  - Write transaction latency: $< 15\text{ms}$.
-  - Full-text search across 5,000 tasks: $< 10\text{ms}$.
-
-### 2.2 The Cloudflare Edge Bridge (`shadow-edge`)
-- **Wrangler Configuration:** Managed under `edge/wrangler.toml`.
-- **Bindings:**
-  - `D1Database`: `SHADOW_EDGE_D1` (Mirror DB and sync registry)
-  - `Queue`: `JIRA_WEBHOOK_QUEUE` (Ingestion queue)
-  - `KVNamespace`: `SHADOW_KV_SESSIONS` (Temporary OAuth tokens and nonce store)
-- **Security:**
-  - Local CLI authenticates to Worker using Ed25519 signed headers or high-entropy Bearer API tokens generated during `shadow auth login`.
-  - Zero plaintext secrets stored in git; production credentials stored in Cloudflare Secrets and developer credentials in OS Keychain (`keytar` or `security-cli`).
-
-### 2.3 The Privacy & Sanitization Firewall
-Before any local payload leaves the machine:
-```typescript
-export interface SanitizationRules {
-  stripFields: string[]; // e.g. ['notes', 'debug_logs', 'scratchpad']
-  redactPatterns: RegExp[]; // API keys, emails, internal corporate domains
-  maskFilePaths: boolean; // Replaces /Users/jacob/... with ~/...
-  requireConfirmation: boolean;
-}
-```
-
----
-
-## Section 3: Detailed Milestone Delivery Plan
-
-```
-+-----------------------------------------------------------------------------------------+
-|                                    MILESTONE MATRIX                                     |
 +--------------------+-------------------------------------------+------------------------+
-| Milestone          | Primary Focus                             | Key Deliverable        |
+| Milestone          | Primary Focus                             | Tickets                |
 +--------------------+-------------------------------------------+------------------------+
-| **Milestone 0**    | Local Storage & Core CLI                  | `shadow` standalone    |
-| **Milestone 1**    | Agent Skill & Concurrency                 | `SKILL.md` & Harness   |
-| **Milestone 2**    | Cloudflare Edge Relay (D1/Workers/Queues) | `shadow-edge` API      |
-| **Milestone 3**    | $N \leftrightarrow M$ Engine & Jira Sync  | Full Bi-directional    |
-| **Milestone 4**    | Developer TUI & Cloudflare Dashboard      | TUI & Web Projection   |
+| **Milestone 0**    | Local Storage, Concurrency & Core CLI     | 12 Granular Tickets    |
+| **Milestone 1**    | Agent Skill, Idempotency & Verification   | 13 Granular Tickets    |
+| **Milestone 2**    | Cloudflare Edge Relay (D1/Workers/Queues) | 14 Granular Tickets    |
+| **Milestone 3**    | N <-> M Mapping, ADF & Jira Sync Engine   | 13 Granular Tickets    |
+| **Milestone 4**    | Developer TUI, Web Viewer & Release Ops   | 12 Granular Tickets    |
++--------------------+-------------------------------------------+------------------------+
+| **Total**          | **Complete Production MVP**               | **64 Granular Tickets**|
 +--------------------+-------------------------------------------+------------------------+
 ```
 
 ---
 
-## Section 4: Shovel-Ready Ticket Breakdown (Summary)
+## Section 4: 64-Ticket Granular Backlog Overview
 
-The complete implementation comprises **25 granular, shovel-ready tickets** across the five milestones:
+*(Full technical specifications, data contracts, and acceptance criteria are documented in `TICKETS.md`)*
 
-- **Milestone 0: Core Local Foundation & SQLite Engine**
-  - `SHD-CORE-001`: Workspace Scaffolding & Bun/TypeScript Monorepo Setup
-  - `SHD-CORE-002`: SQLite Schema, Drizzle ORM & Migration Subsystem
-  - `SHD-CORE-003`: Local Task Engine & Hierarchy Management
-  - `SHD-CORE-004`: Unified CLI Framework & Dual-Mode Formatter (Human & `--json`)
-  - `SHD-CORE-005`: Git Branch & Worktree (`wt`) Context Integration
+### Milestone 0: Local Storage, Concurrency & Core CLI (12 Tickets)
+- `SHD-CORE-001`: Monorepo Scaffolding & Bun Toolchain Configuration
+- `SHD-CORE-002`: Multi-Environment Isolation & Database Path Resolver
+- `SHD-CORE-003`: SQLite WAL Configuration, Pragmas & Checkpointing Subsystem
+- `SHD-CORE-004`: Embedded SQLite Migrations Engine & Drizzle ORM Setup
+- `SHD-CORE-005`: Core Task Table Schema & Recursive Hierarchy Drizzle Models
+- `SHD-CORE-006`: Task Service CRUD Operations & Cycle Detection Logic
+- `SHD-CORE-007`: SQLite FTS5 Full-Text Search Engine & Query Builder
+- `SHD-CORE-008`: Git Context & Worktrunk (`wt`) Workspace ID Binding
+- `SHD-CORE-009`: Unified CLI Entrypoint & Argument Parsing Framework
+- `SHD-CORE-010`: Dual-Mode Formatter (Human ANSI Tables vs Agent JSON)
+- `SHD-CORE-011`: Stdin Stream & Markdown File Ingestion (`--body-file`)
+- `SHD-CORE-012`: SQLite Disaster Recovery & Automated Snapshot Backup Engine
 
-- **Milestone 1: Agent Skill Protocol & Context Engine**
-  - `SHD-SKILL-001`: Standardized Agent Skill Specification (`SKILL.md`)
-  - `SHD-SKILL-002`: Agent Lifecycle Hooks & Proactive Trigger Definitions
-  - `SHD-SKILL-003`: Dual-Verification Gatekeeper & Closure Protocols
-  - `SHD-SKILL-004`: Subagent Multi-Process Concurrency & SQLite WAL Stress Harness
-  - `SHD-SKILL-005`: Prompt Context Injection Subcommand (`shadow context`)
+### Milestone 1: Agent Skill Protocol, Idempotency & Verification (13 Tickets)
+- `SHD-SKILL-001`: Production Agent Skill Specification (`skills/shadow/SKILL.md`)
+- `SHD-SKILL-002`: Skill Distribution & Multi-Agent Installation Scripts
+- `SHD-SKILL-003`: Agent Idempotency Token Engine & Duplicate Prevention
+- `SHD-SKILL-004`: Anti-Ghost Work Protocol & Automatic Task Association
+- `SHD-SKILL-005`: Task Pivot & Context Switch Lifecycle Hooks
+- `SHD-SKILL-006`: Dual-Verification Gatekeeper Engine (`--verify-cmd`)
+- `SHD-SKILL-007`: Markdown Checklist Parser & Completion Validator
+- `SHD-SKILL-008`: Session Wrap-up & Append-Only Progress Logger
+- `SHD-SKILL-009`: Multi-Process SQLite Concurrency & Jittered Retry Harness
+- `SHD-SKILL-010`: Active Task Prompt Injection Helper (`shadow context`)
+- `SHD-SKILL-011`: Subagent Task Claiming & Worker Lock Mechanism
+- `SHD-SKILL-012`: Agent Anti-Bloat Output Sanitizer & Exit Code Standards
+- `SHD-SKILL-013`: Agent Multi-Turn Task Decomposition Template Generator
 
-- **Milestone 2: Cloudflare Edge Bridge (`shadow-edge`)**
-  - `SHD-CF-001`: Cloudflare Worker API & Wrangler Environment Setup
-  - `SHD-CF-002`: Cloudflare D1 Edge Schema & Shared Drizzle Parity
-  - `SHD-CF-003`: Atlassian Jira OAuth 2.0 3LO Broker on Workers
-  - `SHD-CF-004`: Cloudflare Queues Jira Webhook Receiver & Buffer
-  - `SHD-CF-005`: Local CLI Auth Dance & OS Keychain Credential Store
+### Milestone 2: Cloudflare Edge Bridge (`shadow-edge`) (14 Tickets)
+- `SHD-CF-001`: Cloudflare Worker Scaffold with Hono & Wrangler Environments
+- `SHD-CF-002`: Cloudflare D1 Schema Definition with 100% Local Drizzle Parity
+- `SHD-CF-003`: Cloudflare D1 Additive Migration Pipeline & Miniflare Harness
+- `SHD-CF-004`: Atlassian OAuth 2.0 3LO Authorization Endpoint Handler
+- `SHD-CF-005`: Atlassian OAuth Callback, Token Exchange & Cloudflare KV Nonce
+- `SHD-CF-006`: Distributed Token Refresh Mutex & In-Flight Request Cache
+- `SHD-CF-007`: Cloudflare Queues Ingestion Worker for Jira Webhooks
+- `SHD-CF-008`: Webhook HMAC Verification & Signature Validator
+- `SHD-CF-009`: Webhook Event Dispatcher & D1 Mailbox Upsert Consumer
+- `SHD-CF-010`: Cloudflare Worker API Authentication Middleware (Bearer API Keys)
+- `SHD-CF-011`: Local CLI `shadow auth login` Interactive Browser Pairing Flow
+- `SHD-CF-012`: OS Keychain Credential Management (`keytar` / native CLI wrapper)
+- `SHD-CF-013`: Cloudflare Edge Rate-Limiting & Enterprise WAF Configuration
+- `SHD-CF-014`: Staging vs Production CI/CD Deployment Workflow (GitHub Actions)
 
-- **Milestone 3: $N \leftrightarrow M$ Mapping, Rollup & Jira Sync Engine**
-  - `SHD-SYNC-001`: The $N \leftrightarrow M$ Relational Mapping Engine
-  - `SHD-SYNC-002`: Rollup Synthesis & ADF (Atlassian Document Format) Generator
-  - `SHD-SYNC-003`: Privacy & Sanitization Firewall
-  - `SHD-SYNC-004`: Jira REST API v3 Client & Rate-Limited Transport
-  - `SHD-SYNC-005`: Offline Mutation Queue & Background Reconciliation Engine
+### Milestone 3: $N \leftrightarrow M$ Mapping, Rollup & Jira Sync Engine (13 Tickets)
+- `SHD-SYNC-001`: The $N \leftrightarrow M$ Relational Join Table Schema & Operations
+- `SHD-SYNC-002`: Many-to-One ($N \rightarrow 1$) Task Tree Rollup Generator
+- `SHD-SYNC-003`: One-to-Many ($1 \rightarrow M$) Multi-Project Fan-Out Resolver
+- `SHD-SYNC-004`: Atlassian Document Format (ADF) AST Generator & Validator
+- `SHD-SYNC-005`: Dynamic Jira `createmeta` & `editmeta` Introspection Cache
+- `SHD-SYNC-006`: Interactive & Declarative Jira Mandatory Field Fallback Resolver
+- `SHD-SYNC-007`: Privacy Firewall: Field Stripper & Tag Redactor
+- `SHD-SYNC-008`: Privacy Firewall: Regex Secret & Path Redactor with `--dry-run`
+- `SHD-SYNC-009`: Jira Cloud REST v3 Client with Backoff & Jitter Transport
+- `SHD-SYNC-010`: Jira Status Transition State Machine Mapping Engine
+- `SHD-SYNC-011`: Local Offline Mutation Queue (`sync_queue`) Subsystem
+- `SHD-SYNC-012`: Bidirectional 3-Way Merge Conflict Resolver (`ours`/`theirs`)
+- `SHD-SYNC-013`: Sync Audit Logging & Tamper-Evident Local History Log
 
-- **Milestone 4: Developer TUI & Cloudflare Edge Dashboard**
-  - `SHD-TUI-001`: Interactive Terminal Dashboard (TUI)
-  - `SHD-TUI-002`: Git Hook Auto-Sync Integrations (`pre-push`, `post-commit`)
-  - `SHD-WEB-001`: Cloudflare Pages Read-Only Stakeholder Viewer
-  - `SHD-DOCS-001`: Developer Onboarding, Architecture Docs & CLI Reference
-  - `SHD-QA-001`: End-to-End Simulation & Verification Test Suite
-
-*(See `TICKETS.md` for complete technical specifications, acceptance criteria, and dependency graphs for each ticket).*
+### Milestone 4: Developer TUI, Web Viewer & Release Operations (12 Tickets)
+- `SHD-TUI-001`: Terminal User Interface (TUI) Canvas & Navigation State Engine
+- `SHD-TUI-002`: TUI Kanban Board View with Drag/Key Status Transitions
+- `SHD-TUI-003`: TUI Hierarchy Tree View & Jira Association Inspector
+- `SHD-TUI-004`: Git Hook Installer (`pre-push`, `post-commit` non-blocking sync)
+- `SHD-WEB-001`: Cloudflare Pages Read-Only Viewer Scaffold (React/Vite)
+- `SHD-WEB-002`: Cloudflare D1 Read-Only Edge API for Web Projection
+- `SHD-WEB-003`: Cloudflare Zero Trust Access & Shared Token Auth for Web Viewer
+- `SHD-DOCS-001`: Developer Guide, Architecture Specs & CLI Reference
+- `SHD-DOCS-002`: Automated Shell Autocompletion Scripts (zsh, bash, fish)
+- `SHD-REL-001`: Cross-Platform Standalone Binary Build Pipeline (macOS/Linux)
+- `SHD-REL-002`: Homebrew Tap Formula & One-Line `curl | sh` Installer
+- `SHD-QA-001`: End-to-End Multi-Worktree Multi-Agent Simulation Test Suite
 
 ---
 
-*End of Strategic Roadmap.*
+*End of Strategic Roadmap v2.0.*
