@@ -4,10 +4,13 @@
   "private": true,
   "main": "src/index.ts",
   "dependencies": {
-    "@shadow/shared": "workspace:*"
+    "@shadow/shared": "workspace:*",
+    "hono": "^4.7.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
     "@types/bun": "latest",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "wrangler": "^3.109.2"
   }
 }
