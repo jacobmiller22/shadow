@@ -22,6 +22,14 @@ function getGlobalOptions(): GlobalCliOptions {
   };
 }
 
+// Top-level context command for fast agent prompt injection (SHD-SKILL-010)
+program
+  .command("context")
+  .description("Display current workspace and active task execution context for agent injection")
+  .action(() => {
+    TaskCommandHandler.context(getGlobalOptions());
+  });
+
 // ==================== TASK COMMAND GROUP ====================
 const taskCmd = program.command("task").description("Manage local tasks and work breakdown structures");
 
@@ -34,6 +42,7 @@ taskCmd
   .option("--parent <parentId>", "Parent task ID to nest under")
   .option("-s, --status <status>", "Initial status: todo, in_progress, blocked, done", "todo")
   .option("--id <customId>", "Explicit custom task ID (e.g. SHD-1001)")
+  .option("--idempotency-key <key>", "Unique key to deduplicate agent task creation retries")
   .action(async (title, options) => {
     await TaskCommandHandler.add(title, options, getGlobalOptions());
   });
@@ -43,6 +52,22 @@ taskCmd
   .description("Retrieve task details by ID")
   .action((id) => {
     TaskCommandHandler.get(id, getGlobalOptions());
+  });
+
+taskCmd
+  .command("active")
+  .description("Show or auto-provision the currently active in-progress task")
+  .option("--auto-create <title>", "Automatically create and activate a task if none active")
+  .option("-p, --priority <priority>", "Priority for auto-created task", "high")
+  .action((options) => {
+    TaskCommandHandler.active(options, getGlobalOptions());
+  });
+
+taskCmd
+  .command("pivot <newTaskId>")
+  .description("Pause currently active task context and activate new target task")
+  .action((newTaskId) => {
+    TaskCommandHandler.pivot(newTaskId, getGlobalOptions());
   });
 
 taskCmd
@@ -72,9 +97,68 @@ taskCmd
 
 taskCmd
   .command("close <id>")
-  .description("Close a task and mark as done")
+  .description("Close a task and mark as done (runs checklist and verification checks)")
+  .option("--force", "Bypass uncompleted checklist guard")
+  .option("--verify-cmd <command>", "Verification command that must exit 0 before closure")
+  .action((id, options) => {
+    TaskCommandHandler.close(id, options, getGlobalOptions());
+  });
+
+taskCmd
+  .command("checklist <id>")
+  .description("Inspect or check off markdown checklist items on a task")
+  .option("--check <indexOrText>", "Mark checklist item as completed")
+  .option("--uncheck <indexOrText>", "Mark checklist item as incomplete")
+  .action((id, options) => {
+    TaskCommandHandler.checklist(id, options, getGlobalOptions());
+  });
+
+taskCmd
+  .command("comment <id> <message>")
+  .alias("log")
+  .description("Append a progress note or audit log to the task")
+  .action((id, message) => {
+    TaskCommandHandler.comment(id, message, getGlobalOptions());
+  });
+
+taskCmd
+  .command("history <id>")
+  .alias("logs")
+  .description("View chronological audit event history for a task")
   .action((id) => {
-    TaskCommandHandler.close(id, getGlobalOptions());
+    TaskCommandHandler.history(id, getGlobalOptions());
+  });
+
+taskCmd
+  .command("claim <id>")
+  .description("Claim task with worker lock lease for subagent concurrency")
+  .requiredOption("-w, --worker <workerId>", "Worker identifier claiming the task")
+  .option("--lease <seconds>", "Lease duration in seconds (default: 300)", "300")
+  .action((id, options) => {
+    TaskCommandHandler.claim(id, options, getGlobalOptions());
+  });
+
+taskCmd
+  .command("release <id>")
+  .description("Release a worker claim lock")
+  .requiredOption("-w, --worker <workerId>", "Worker identifier releasing the task")
+  .action((id, options) => {
+    TaskCommandHandler.release(id, options, getGlobalOptions());
+  });
+
+taskCmd
+  .command("template")
+  .description("List available task decomposition templates")
+  .action(() => {
+    TaskCommandHandler.templates(getGlobalOptions());
+  });
+
+taskCmd
+  .command("decompose <id>")
+  .description("Decompose a parent task into subtasks using a predefined template")
+  .requiredOption("-t, --template <name>", "Template name (feature, bugfix, refactor, research)")
+  .action((id, options) => {
+    TaskCommandHandler.decompose(id, options, getGlobalOptions());
   });
 
 taskCmd

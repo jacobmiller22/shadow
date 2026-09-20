@@ -1,8 +1,23 @@
 import pc from "picocolors";
-import type { Task, TaskTreeNode } from "@shadow/shared";
+import {
+  type Task,
+  type TaskTreeNode,
+  UncompletedChecklistError,
+  VerificationFailedError,
+  LockCollisionError,
+  CycleError,
+} from "@shadow/shared";
 
 export interface FormatterOptions {
   json?: boolean;
+}
+
+export class ExitCodes {
+  public static SUCCESS = 0;
+  public static GENERAL_ERROR = 1;
+  public static VALIDATION_FAILED = 2;
+  public static VERIFICATION_FAILED = 3;
+  public static LOCK_COLLISION = 4;
 }
 
 export class OutputFormatter {
@@ -44,14 +59,15 @@ export class OutputFormatter {
     }
   }
 
-  public static printTask(task: Task, options?: FormatterOptions): void {
+  public static printTask(task: Task & { isDeduplicated?: boolean }, options?: FormatterOptions): void {
     if (this.isJsonMode(options)) {
       console.log(JSON.stringify(task, null, 2));
       return;
     }
 
     console.log();
-    console.log(`${pc.bold(task.id)}: ${pc.bold(pc.white(task.title))}`);
+    const dedupBadge = task.isDeduplicated ? pc.dim(" (deduplicated)") : "";
+    console.log(`${pc.bold(task.id)}: ${pc.bold(pc.white(task.title))}${dedupBadge}`);
     console.log(pc.dim("─".repeat(60)));
     console.log(`  ${pc.bold("Status:")}     ${this.formatStatus(task.status)}`);
     console.log(`  ${pc.bold("Priority:")}   ${this.formatPriority(task.priority)}`);
@@ -146,12 +162,70 @@ export class OutputFormatter {
     console.log(`${pc.green("✓")} ${message}`);
   }
 
-  public static printError(error: any, options?: FormatterOptions): void {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (this.isJsonMode(options)) {
-      console.error(JSON.stringify({ success: false, error: msg }, null, 2));
-      return;
+  public static printError(error: any, options?: FormatterOptions): number {
+    let exitCode = ExitCodes.GENERAL_ERROR;
+    let codeName = "GENERAL_ERROR";
+    let message = error instanceof Error ? error.message : String(error);
+    let details: any = undefined;
+
+    if (error instanceof UncompletedChecklistError) {
+      exitCode = ExitCodes.VALIDATION_FAILED;
+      codeName = "VALIDATION_FAILED";
+      details = {
+        remaining: error.report.remaining,
+        total: error.report.total,
+        uncheckedItems: error.report.items.filter((i) => !i.checked).map((i) => i.text),
+      };
+    } else if (error instanceof VerificationFailedError) {
+      exitCode = ExitCodes.VERIFICATION_FAILED;
+      codeName = "VERIFICATION_FAILED";
+      details = {
+        command: error.result.command,
+        exitCode: error.result.exitCode,
+        stdout: error.result.stdout,
+        stderr: error.result.stderr,
+      };
+    } else if (error instanceof LockCollisionError) {
+      exitCode = ExitCodes.LOCK_COLLISION;
+      codeName = "LOCK_COLLISION";
+      details = {
+        workerId: error.workerId,
+        remainingSeconds: error.remainingSeconds,
+      };
+    } else if (error instanceof CycleError) {
+      exitCode = ExitCodes.VALIDATION_FAILED;
+      codeName = "CYCLE_ERROR";
     }
-    console.error(`${pc.red("Error:")} ${msg}`);
+
+    process.exitCode = exitCode;
+
+    if (this.isJsonMode(options)) {
+      console.error(
+        JSON.stringify(
+          {
+            success: false,
+            code: codeName,
+            exitCode,
+            error: message,
+            details,
+          },
+          null,
+          2
+        )
+      );
+    } else {
+      console.error(`${pc.red("Error:")} ${message}`);
+      if (details?.uncheckedItems) {
+        console.error(pc.yellow("Remaining unchecked items:"));
+        for (const item of details.uncheckedItems) {
+          console.error(pc.yellow(`  - [ ] ${item}`));
+        }
+      }
+      if (details?.stderr) {
+        console.error(pc.red(`Command output:\n${details.stderr}`));
+      }
+    }
+
+    return exitCode;
   }
 }

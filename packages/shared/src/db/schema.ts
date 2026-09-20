@@ -54,6 +54,28 @@ export const syncQueue = sqliteTable("sync_queue", {
   error: text("error"),
 });
 
+export const idempotencyTokens = sqliteTable("idempotency_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  token: text("token").notNull().unique(),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at", { mode: "number" }).notNull(),
+  expiresAt: integer("expires_at", { mode: "number" }).notNull(),
+});
+
+export const workerClaims = sqliteTable("worker_claims", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  taskId: text("task_id")
+    .notNull()
+    .unique()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  workerId: text("worker_id").notNull(),
+  claimedAt: integer("claimed_at", { mode: "number" }).notNull(),
+  leaseSeconds: integer("lease_seconds", { mode: "number" }).notNull(),
+  expiresAt: integer("expires_at", { mode: "number" }).notNull(),
+});
+
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type TaskRelation = typeof taskRelations.$inferSelect;
@@ -62,3 +84,7 @@ export type TaskEvent = typeof taskEvents.$inferSelect;
 export type NewTaskEvent = typeof taskEvents.$inferInsert;
 export type SyncQueueItem = typeof syncQueue.$inferSelect;
 export type NewSyncQueueItem = typeof syncQueue.$inferInsert;
+export type IdempotencyToken = typeof idempotencyTokens.$inferSelect;
+export type NewIdempotencyToken = typeof idempotencyTokens.$inferInsert;
+export type WorkerClaim = typeof workerClaims.$inferSelect;
+export type NewWorkerClaim = typeof workerClaims.$inferInsert;

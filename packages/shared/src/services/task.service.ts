@@ -5,11 +5,40 @@ import * as schema from "../db/schema";
 import { FTSSearchEngine, type FTSMatchResult } from "../db/fts";
 import { GitContextResolver } from "../git/context";
 import { SQLiteConnectionFactory } from "../db/connection";
+import { IdempotencyEngine } from "./idempotency.service";
+import { ChecklistService, type ChecklistReport } from "./checklist.service";
+import { VerificationService, type VerificationResult } from "./verify.service";
+import { DecompositionTemplateService } from "./template.service";
+import { WorkerClaimService } from "./claim.service";
 
 export class CycleError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CycleError";
+  }
+}
+
+export class UncompletedChecklistError extends Error {
+  public report: ChecklistReport;
+
+  constructor(taskId: string, report: ChecklistReport) {
+    super(
+      `Cannot close task ${taskId}: ${report.remaining} unchecked checklist item(s) remain. Use --force to override.`
+    );
+    this.name = "UncompletedChecklistError";
+    this.report = report;
+  }
+}
+
+export class VerificationFailedError extends Error {
+  public result: VerificationResult;
+
+  constructor(taskId: string, result: VerificationResult) {
+    super(
+      `Verification command failed for task ${taskId} (exit code ${result.exitCode}):\n${result.stderr || result.stdout}`
+    );
+    this.name = "VerificationFailedError";
+    this.result = result;
   }
 }
 
@@ -23,6 +52,7 @@ export interface CreateTaskInput {
   workspaceId?: string;
   metadata?: Record<string, any>;
   customId?: string;
+  idempotencyKey?: string;
 }
 
 export interface UpdateTaskInput {
@@ -33,6 +63,11 @@ export interface UpdateTaskInput {
   parentId?: string | null;
   branch?: string;
   metadata?: Record<string, any>;
+}
+
+export interface CloseTaskOptions {
+  force?: boolean;
+  verifyCmd?: string;
 }
 
 export interface ListTasksFilter {
@@ -54,10 +89,18 @@ export interface TaskTreeNode extends schema.Task {
 export class TaskService {
   private db: Database;
   private orm: ReturnType<typeof drizzle<typeof schema>>;
+  private idempotency: IdempotencyEngine;
+  private claims: WorkerClaimService;
 
   constructor(db: Database) {
     this.db = db;
     this.orm = drizzle(db, { schema });
+    this.idempotency = new IdempotencyEngine(db);
+    this.claims = new WorkerClaimService(db);
+  }
+
+  public getClaimsService(): WorkerClaimService {
+    return this.claims;
   }
 
   /**
@@ -71,7 +114,6 @@ export class TaskService {
         return `SHD-${String(numPart + 1).padStart(4, "0")}`;
       }
     }
-    // Fallback if non-sequential
     const countRes = this.db.query("SELECT count(*) as count FROM tasks;").get() as any;
     const count = (countRes?.count ?? 0) + 1;
     return `SHD-${String(count).padStart(4, "0")}`;
@@ -85,7 +127,6 @@ export class TaskService {
       throw new CycleError(`Cycle detected: Task ${taskId} cannot be its own parent.`);
     }
 
-    // Traverse upwards from targetParentId to root. If taskId is encountered, it is a cycle.
     let currentId: string | null = targetParentId;
     const visited = new Set<string>();
 
@@ -114,7 +155,6 @@ export class TaskService {
       throw new CycleError(`Cycle detected: Task ${sourceId} cannot block itself.`);
     }
 
-    // DFS from targetId to see if we can reach sourceId through 'blocks' relations
     const visited = new Set<string>();
     const stack = [targetId];
 
@@ -136,12 +176,25 @@ export class TaskService {
   }
 
   /**
-   * Creates a new task and emits creation events.
+   * Creates a new task with idempotency protection against duplicate agent retries.
    */
-  public createTask(input: CreateTaskInput): schema.Task {
+  public createTask(input: CreateTaskInput): schema.Task & { isDeduplicated?: boolean } {
     const gitContext = GitContextResolver.resolve();
     const workspaceId = input.workspaceId || gitContext.workspaceId;
     const branch = input.branch || (gitContext.isGitRepo ? gitContext.currentBranch : undefined);
+
+    // 1. Check idempotency deduplication
+    const token = IdempotencyEngine.generateToken(
+      workspaceId,
+      input.title,
+      input.parentId,
+      input.idempotencyKey
+    );
+    const existing = this.idempotency.findExisting(token);
+    if (existing) {
+      return { ...existing, isDeduplicated: true };
+    }
+
     const id = input.customId || this.generateTaskId();
     const now = Date.now();
 
@@ -171,6 +224,9 @@ export class TaskService {
     SQLiteConnectionFactory.withRetry(() => {
       this.orm.insert(schema.tasks).values(newTask).run();
 
+      // Register idempotency token
+      this.idempotency.register(token, id);
+
       // Record event
       this.orm.insert(schema.taskEvents).values({
         taskId: id,
@@ -190,7 +246,7 @@ export class TaskService {
       }).run();
     });
 
-    return this.getTask(id)!;
+    return { ...this.getTask(id)!, isDeduplicated: false };
   }
 
   /**
@@ -199,6 +255,52 @@ export class TaskService {
   public getTask(id: string): schema.Task | null {
     const result = this.orm.select().from(schema.tasks).where(eq(schema.tasks.id, id)).get();
     return result || null;
+  }
+
+  /**
+   * Retrieves the currently active in-progress task for the current workspace/branch.
+   */
+  public getActiveTask(branch?: string, workspaceId?: string): schema.Task | null {
+    const gitContext = GitContextResolver.resolve();
+    const effectiveWorkspace = workspaceId || gitContext.workspaceId;
+    const effectiveBranch = branch || gitContext.currentBranch;
+
+    // First try: in_progress on active branch
+    let row = this.db
+      .query(
+        `SELECT * FROM tasks
+         WHERE workspace_id = ? AND branch = ? AND status = 'in_progress'
+         ORDER BY updated_at DESC LIMIT 1;`
+      )
+      .get(effectiveWorkspace, effectiveBranch) as any;
+
+    if (!row) {
+      // Second try: any in_progress task in the workspace
+      row = this.db
+        .query(
+          `SELECT * FROM tasks
+           WHERE workspace_id = ? AND status = 'in_progress'
+           ORDER BY updated_at DESC LIMIT 1;`
+        )
+        .get(effectiveWorkspace) as any;
+    }
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      title: row.title,
+      description: row.description,
+      status: row.status,
+      priority: row.priority,
+      parentId: row.parent_id,
+      branch: row.branch,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at,
+    };
   }
 
   /**
@@ -239,7 +341,6 @@ export class TaskService {
     SQLiteConnectionFactory.withRetry(() => {
       this.orm.update(schema.tasks).set(updateValues).where(eq(schema.tasks.id, id)).run();
 
-      // Record event
       this.orm.insert(schema.taskEvents).values({
         taskId: id,
         eventType: "updated",
@@ -247,7 +348,6 @@ export class TaskService {
         timestamp: now,
       }).run();
 
-      // Enqueue sync mutation
       this.orm.insert(schema.syncQueue).values({
         entityType: "task",
         entityId: id,
@@ -259,6 +359,161 @@ export class TaskService {
     });
 
     return this.getTask(id)!;
+  }
+
+  /**
+   * Closes a task with checklist validation and optional verification command execution.
+   */
+  public closeTask(id: string, options: CloseTaskOptions = {}): schema.Task {
+    const task = this.getTask(id);
+    if (!task) {
+      throw new Error(`Task not found: ${id}`);
+    }
+
+    // 1. Checklist completion guard (SHD-SKILL-007)
+    if (!options.force && task.description) {
+      const report = ChecklistService.parse(task.description);
+      if (!report.allCompleted) {
+        throw new UncompletedChecklistError(id, report);
+      }
+    }
+
+    // 2. Verification command probe (SHD-SKILL-006)
+    if (options.verifyCmd) {
+      const verifyResult = VerificationService.execute(options.verifyCmd);
+      const now = Date.now();
+
+      if (!verifyResult.success) {
+        // Log verification failure
+        SQLiteConnectionFactory.withRetry(() => {
+          this.orm.insert(schema.taskEvents).values({
+            taskId: id,
+            eventType: "verification_failed",
+            payload: JSON.stringify(verifyResult),
+            timestamp: now,
+          }).run();
+        });
+        throw new VerificationFailedError(id, verifyResult);
+      }
+
+      // Log verification success
+      SQLiteConnectionFactory.withRetry(() => {
+        this.orm.insert(schema.taskEvents).values({
+          taskId: id,
+          eventType: "verified",
+          payload: JSON.stringify(verifyResult),
+          timestamp: now,
+        }).run();
+      });
+    }
+
+    // 3. Complete task
+    return this.updateTask(id, { status: "done" });
+  }
+
+  /**
+   * Context pivot: pauses the active task and transitions another task to in_progress.
+   */
+  public pivotTask(newTaskId: string): { previous: schema.Task | null; active: schema.Task } {
+    const target = this.getTask(newTaskId);
+    if (!target) {
+      throw new Error(`Target task for pivot not found: ${newTaskId}`);
+    }
+
+    const gitContext = GitContextResolver.resolve();
+    const effectiveBranch = target.branch || (gitContext.isGitRepo ? gitContext.currentBranch : "main");
+    const currentActive = this.getActiveTask(effectiveBranch, target.workspaceId);
+
+    const now = Date.now();
+    let prevUpdated: schema.Task | null = null;
+
+    if (currentActive && currentActive.id !== newTaskId) {
+      // Record checkpoint on previous task
+      this.addComment(currentActive.id, `⏸️ Paused task context for pivot to ${newTaskId}`);
+      prevUpdated = this.updateTask(currentActive.id, { status: "todo" });
+    }
+
+    // Activate new task
+    this.addComment(newTaskId, `▶️ Pivoted task context to active on branch '${effectiveBranch}'`);
+    const activeUpdated = this.updateTask(newTaskId, {
+      status: "in_progress",
+      branch: effectiveBranch,
+    });
+
+    return { previous: prevUpdated, active: activeUpdated };
+  }
+
+  /**
+   * Appends an audit comment or progress note to task_events.
+   */
+  public addComment(id: string, message: string): void {
+    const task = this.getTask(id);
+    if (!task) {
+      throw new Error(`Task not found: ${id}`);
+    }
+
+    const now = Date.now();
+    SQLiteConnectionFactory.withRetry(() => {
+      this.orm.insert(schema.taskEvents).values({
+        taskId: id,
+        eventType: "comment",
+        payload: JSON.stringify({ message }),
+        timestamp: now,
+      }).run();
+
+      this.orm.update(schema.tasks).set({ updatedAt: now }).where(eq(schema.tasks.id, id)).run();
+    });
+  }
+
+  /**
+   * Retrieves event history for a task.
+   */
+  public getTaskHistory(id: string): schema.TaskEvent[] {
+    const rows = this.db
+      .query(`SELECT * FROM task_events WHERE task_id = ? ORDER BY timestamp ASC;`)
+      .all(id) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      taskId: r.task_id,
+      eventType: r.event_type,
+      payload: r.payload,
+      timestamp: r.timestamp,
+    }));
+  }
+
+  /**
+   * Decomposes a parent task using a predefined template (SHD-SKILL-013).
+   */
+  public decomposeTask(parentId: string, templateName: string): schema.Task[] {
+    const parent = this.getTask(parentId);
+    if (!parent) {
+      throw new Error(`Parent task not found: ${parentId}`);
+    }
+
+    const template = DecompositionTemplateService.getTemplate(templateName);
+    if (!template) {
+      throw new Error(`Unknown template '${templateName}'. Available: feature, bugfix, refactor, research`);
+    }
+
+    const created: schema.Task[] = [];
+    for (const sub of template.subtasks) {
+      const child = this.createTask({
+        title: `${parent.title}: ${sub.titleSuffix}`,
+        description: sub.description,
+        priority: sub.priority,
+        parentId: parent.id,
+        status: "todo",
+      });
+      created.push(child);
+    }
+
+    this.addComment(
+      parentId,
+      `Decomposed into ${created.length} subtasks using template '${template.name}'`
+    );
+
+    return created;
   }
 
   /**
@@ -332,7 +587,6 @@ export class TaskService {
     const stmt = this.db.query(query);
     const rows = stmt.all(...params) as any[];
 
-    // Map rows to schema.Task format
     return rows.map((r) => ({
       id: r.id,
       workspaceId: r.workspace_id,
@@ -350,7 +604,7 @@ export class TaskService {
   }
 
   /**
-   * Adds a relation between two tasks (e.g. blocks, relates_to, child_of).
+   * Adds a relation between two tasks.
    */
   public addRelation(
     sourceId: string,
@@ -391,7 +645,7 @@ export class TaskService {
   }
 
   /**
-   * Builds a recursive task tree for a parent task or the entire workspace.
+   * Builds a recursive task tree.
    */
   public getTaskTree(rootTaskId?: string, filter: ListTasksFilter = {}): TaskTreeNode[] {
     const allTasks = this.listTasks(filter);
