@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.shadow-dev/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+bin/shadow
+*.bun-build
+.*.bun-build
+.DS_Store

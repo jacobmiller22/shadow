@@ -1,0 +1,13 @@
+{
+  "name": "@shadow/edge",
+  "version": "2.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@shadow/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.2"
+  }
+}
