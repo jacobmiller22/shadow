@@ -2,6 +2,9 @@
 import { Command } from "commander";
 import { TaskCommandHandler, type GlobalCliOptions } from "./commands/task";
 import { DbCommandHandler } from "./commands/db";
+import { LinkCommandHandler } from "./commands/link";
+import { SyncCommandHandler } from "./commands/sync";
+import { AuditCommandHandler } from "./commands/audit";
 
 const program = new Command();
 
@@ -205,6 +208,49 @@ dbCmd
   .description("Display database health, WAL size, and integrity status")
   .action(() => {
     DbCommandHandler.status(getGlobalOptions());
+  });
+
+// ==================== LINK / UNLINK COMMANDS ====================
+program
+  .command("link <taskId> <remoteKey>")
+  .description("Link a local task to a remote issue (e.g. jira:PROJ-101 or gh:42)")
+  .option("--url <remoteUrl>", "Explicit URL to remote entity")
+  .action((taskId, remoteKey, options) => {
+    LinkCommandHandler.link(taskId, remoteKey, options, getGlobalOptions());
+  });
+
+program
+  .command("unlink <taskId> <remoteKey>")
+  .description("Unlink a local task from a remote issue")
+  .action((taskId, remoteKey) => {
+    LinkCommandHandler.unlink(taskId, remoteKey, getGlobalOptions());
+  });
+
+taskCmd
+  .command("links <id>")
+  .description("List remote links associated with this task")
+  .action((id) => {
+    LinkCommandHandler.list(id, getGlobalOptions());
+  });
+
+// ==================== SYNC COMMAND ====================
+program
+  .command("sync")
+  .description("Synchronize local mutations with remote Cloudflare Edge & Jira")
+  .option("--dry-run", "Preview outbound sanitized diff without performing sync")
+  .option("--strategy <strategy>", "Conflict strategy: ours, theirs, prompt", "theirs")
+  .option("-q, --quiet", "Suppress non-essential progress output")
+  .action(async (options) => {
+    await SyncCommandHandler.run(options, getGlobalOptions());
+  });
+
+// ==================== AUDIT COMMAND ====================
+program
+  .command("audit")
+  .description("View sync audit logs")
+  .option("-l, --limit <count>", "Limit number of entries", "50")
+  .action((options) => {
+    AuditCommandHandler.list(options, getGlobalOptions());
   });
 
 program.parse(process.argv);
