@@ -1,0 +1,48 @@
+name = "shadow-edge"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Production Cloudflare D1 Database Binding (SHD-CF-002)
+[[d1_databases]]
+binding = "DB"
+database_name = "shadow-edge-prod-d1"
+database_id = "prod-shadow-d1-placeholder"
+
+# Production Cloudflare KV Binding for OAuth State & Refresh Mutex (SHD-CF-005, SHD-CF-006)
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "prod-oauth-kv-placeholder"
+
+# Cloudflare Queues Producer for Asynchronous Webhook Ingestion (SHD-CF-007)
+[[queues.producers]]
+binding = "WEBHOOK_QUEUE"
+queue = "jira-webhooks-prod"
+
+# Cloudflare Queues Consumer for Webhook Processing (SHD-CF-008)
+[[queues.consumers]]
+queue = "jira-webhooks-prod"
+max_batch_size = 20
+max_batch_timeout = 5
+
+# ==================== STAGING ENVIRONMENT (ADR-005) ====================
+[env.staging]
+name = "shadow-edge-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "shadow-edge-staging-d1"
+database_id = "staging-shadow-d1-placeholder"
+
+[[env.staging.kv_namespaces]]
+binding = "OAUTH_KV"
+id = "staging-oauth-kv-placeholder"
+
+[[env.staging.queues.producers]]
+binding = "WEBHOOK_QUEUE"
+queue = "jira-webhooks-staging"
+
+[[env.staging.queues.consumers]]
+queue = "jira-webhooks-staging"
+max_batch_size = 10
+max_batch_timeout = 5
