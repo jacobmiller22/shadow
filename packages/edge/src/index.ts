@@ -4,6 +4,7 @@ import { atlassianAuthRouter, type EdgeEnv } from "./auth/atlassian";
 import { deviceAuthRouter } from "./auth/device";
 import { webhookRouter, handleWebhookQueueBatch, type JiraWebhookMessage } from "./queues/webhooks";
 import { syncRouter } from "./sync/routes";
+import { webRouter } from "./web/routes";
 import { createRateLimiter } from "./middleware/rate_limit";
 
 const app = new Hono<{ Bindings: EdgeEnv }>();
@@ -20,6 +21,7 @@ app.route("/v1/auth/jira", atlassianAuthRouter);
 app.route("/v1/auth/device", deviceAuthRouter);
 app.route("/v1/webhooks", webhookRouter);
 app.route("/v1/sync", syncRouter);
+app.route("/v1/web", webRouter);
 
 /**
  * Edge Health Probe Endpoint (SHD-CF-013).

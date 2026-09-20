@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow • Task & Engineering Progress Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-dim: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { font-size: 20px; font-weight: 700; color: #fff; }
+    .badge { background: #21262d; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--accent); border: 1px solid var(--border); }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .metric-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .metric-val { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
+    .metric-lbl { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .kanban-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; min-height: 500px; }
+    .kanban-col { background: #161b22; border: 1px solid var(--border); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; }
+    .col-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-weight: 600; }
+    .card-list { display: flex; flex-direction: column; gap: 12px; flex: 1; }
+    .task-card { background: #21262d; border: 1px solid var(--border); border-radius: 6px; padding: 14px; cursor: pointer; transition: transform 0.1s, border-color 0.1s; }
+    .task-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+    .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; }
+    .task-id { font-weight: 700; color: var(--accent); }
+    .task-prio { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+    .prio-critical { background: rgba(248, 81, 73, 0.2); color: var(--red); }
+    .prio-high { background: rgba(188, 140, 255, 0.2); color: var(--purple); }
+    .prio-medium { background: rgba(210, 153, 34, 0.2); color: var(--yellow); }
+    .prio-low { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+    .task-title { font-size: 14px; color: #fff; font-weight: 500; }
+    .task-branch { font-size: 11px; color: var(--text-dim); margin-top: 6px; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>⚡ Shadow Viewer</h1>
+      <span class="badge">Edge Sync Live</span>
+    </div>
+    <div id="sync-info" style="font-size: 12px; color: var(--text-dim);">
+      Auto-refresh: Active
+    </div>
+  </header>
+
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-lbl">Total Tasks</div>
+      <div class="metric-val" id="metric-total">0</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-lbl">In Progress</div>
+      <div class="metric-val" style="color: var(--accent);" id="metric-prog">0</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-lbl">Completed</div>
+      <div class="metric-val" style="color: var(--green);" id="metric-done">0</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-lbl">Completion Rate</div>
+      <div class="metric-val" id="metric-rate">0%</div>
+    </div>
+  </div>
+
+  <div class="kanban-grid">
+    <div class="kanban-col">
+      <div class="col-header">
+        <span>To Do / Backlog</span>
+        <span id="count-todo" class="badge">0</span>
+      </div>
+      <div class="card-list" id="list-todo"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="col-header">
+        <span style="color: var(--accent);">In Progress</span>
+        <span id="count-prog" class="badge">0</span>
+      </div>
+      <div class="card-list" id="list-prog"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="col-header">
+        <span style="color: var(--green);">Done</span>
+        <span id="count-done" class="badge">0</span>
+      </div>
+      <div class="card-list" id="list-done"></div>
+    </div>
+  </div>
+
+  <script>
+    async function loadTasks() {
+      try {
+        const res = await fetch("/v1/web/tasks");
+        if (!res.ok) return;
+        const data = await res.json();
+        const tasks = data.tasks || [];
+
+        let todo = 0, prog = 0, done = 0;
+        const todoEl = document.getElementById("list-todo");
+        const progEl = document.getElementById("list-prog");
+        const doneEl = document.getElementById("list-done");
+        todoEl.innerHTML = ""; progEl.innerHTML = ""; doneEl.innerHTML = "";
+
+        for (const t of tasks) {
+          const card = document.createElement("div");
+          card.className = "task-card";
+          card.innerHTML = \`
+            <div class="task-header">
+              <span class="task-id">\${t.id}</span>
+              <span class="task-prio prio-\${t.priority}">\${t.priority}</span>
+            </div>
+            <div class="task-title">\${t.title}</div>
+            \${t.branch ? \`<div class="task-branch">\${t.branch}</div>\` : ""}
+          \`;
+
+          if (t.status === "done") {
+            done++;
+            doneEl.appendChild(card);
+          } else if (t.status === "in_progress") {
+            prog++;
+            progEl.appendChild(card);
+          } else {
+            todo++;
+            todoEl.appendChild(card);
+          }
+        }
+
+        document.getElementById("metric-total").innerText = tasks.length;
+        document.getElementById("metric-prog").innerText = prog;
+        document.getElementById("metric-done").innerText = done;
+        const rate = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
+        document.getElementById("metric-rate").innerText = rate + "%";
+
+        document.getElementById("count-todo").innerText = todo;
+        document.getElementById("count-prog").innerText = prog;
+        document.getElementById("count-done").innerText = done;
+      } catch (err) {
+        console.error("Failed to load tasks", err);
+      }
+    }
+
+    loadTasks();
+    setInterval(loadTasks, 5000);
+  </script>
+</body>
+</html>

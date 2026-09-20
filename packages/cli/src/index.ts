@@ -5,6 +5,10 @@ import { DbCommandHandler } from "./commands/db";
 import { LinkCommandHandler } from "./commands/link";
 import { SyncCommandHandler } from "./commands/sync";
 import { AuditCommandHandler } from "./commands/audit";
+import { HookCommandHandler } from "./commands/hook";
+import { CompletionCommandHandler } from "./commands/completion";
+import { ShadowTuiApp } from "./tui/app";
+import { EnvironmentResolver, SQLiteConnectionFactory } from "@shadow/shared";
 
 const program = new Command();
 
@@ -251,6 +255,50 @@ program
   .option("-l, --limit <count>", "Limit number of entries", "50")
   .action((options) => {
     AuditCommandHandler.list(options, getGlobalOptions());
+  });
+
+// ==================== TUI COMMAND ====================
+program
+  .command("ui")
+  .description("Open interactive terminal user interface (Kanban, Tree & Inspector)")
+  .action(async () => {
+    const globalOpts = getGlobalOptions();
+    const dbPath = EnvironmentResolver.resolveDatabasePath({
+      explicitPath: globalOpts.dbPath,
+      envOverride: globalOpts.env,
+    });
+    const db = SQLiteConnectionFactory.open(dbPath);
+    try {
+      const app = new ShadowTuiApp(db);
+      await app.start();
+    } finally {
+      db.close();
+    }
+  });
+
+// ==================== GIT HOOKS COMMAND GROUP ====================
+const hookCmd = program.command("hook").description("Manage non-blocking Git automation hooks");
+
+hookCmd
+  .command("install")
+  .description("Install non-blocking pre-push and post-commit Git hooks")
+  .action(() => {
+    HookCommandHandler.install(getGlobalOptions());
+  });
+
+hookCmd
+  .command("uninstall")
+  .description("Remove installed Shadow Git hooks")
+  .action(() => {
+    HookCommandHandler.uninstall(getGlobalOptions());
+  });
+
+// ==================== AUTOCOMPLETION COMMAND ====================
+program
+  .command("completion <shell>")
+  .description("Generate shell autocompletion script (zsh, bash, fish)")
+  .action((shell) => {
+    CompletionCommandHandler.generate(shell);
   });
 
 program.parse(process.argv);

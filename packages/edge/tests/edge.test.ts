@@ -246,4 +246,59 @@ describe("Milestone 2 Cloudflare Edge Bridge Tests", () => {
     expect(tokenJson.access_token.startsWith("shd_live_")).toBe(true);
     expect(tokenJson.user_id).toBe("dev-user-1");
   });
+
+  test("SHD-WEB-002 & SHD-WEB-003: Web viewer projection endpoints and auth", async () => {
+    // Insert test task into D1
+    await mockD1
+      .prepare(
+        `INSERT INTO tasks (id, workspace_id, title, status, priority, created_at, updated_at)
+         VALUES ('SHD-W1', 'ws-web', 'Web Viewer Task', 'done', 'high', 100, 200);`
+      )
+      .run();
+
+    // 1. Summary endpoint
+    const summaryRes = await app.fetch(new Request("http://localhost/v1/web/summary"), env);
+    expect(summaryRes.status).toBe(200);
+    const summary = (await summaryRes.json()) as any;
+    expect(summary.total).toBeGreaterThanOrEqual(1);
+    expect(summary.done).toBeGreaterThanOrEqual(1);
+
+    // 2. Tasks list endpoint
+    const tasksRes = await app.fetch(new Request("http://localhost/v1/web/tasks?status=done"), env);
+    expect(tasksRes.status).toBe(200);
+    const tasksJson = (await tasksRes.json()) as any;
+    expect(tasksJson.tasks.length).toBeGreaterThanOrEqual(1);
+    expect(tasksJson.tasks[0].id).toBe("SHD-W1");
+
+    // 3. Task detail endpoint
+    const detailRes = await app.fetch(new Request("http://localhost/v1/web/tasks/SHD-W1"), env);
+    expect(detailRes.status).toBe(200);
+    const detailJson = (await detailRes.json()) as any;
+    expect(detailJson.task.title).toBe("Web Viewer Task");
+
+    // 4. Token auth check
+    const authedEnv = {
+      ...env,
+      SHADOW_WEB_TOKEN: "secret-token-xyz",
+    };
+
+    const unauthedRes = await app.fetch(new Request("http://localhost/v1/web/summary"), authedEnv);
+    expect(unauthedRes.status).toBe(401);
+
+    const validBearerRes = await app.fetch(
+      new Request("http://localhost/v1/web/summary", {
+        headers: { Authorization: "Bearer secret-token-xyz" },
+      }),
+      authedEnv
+    );
+    expect(validBearerRes.status).toBe(200);
+
+    const validCfAccessRes = await app.fetch(
+      new Request("http://localhost/v1/web/summary", {
+        headers: { "CF-Access-Client-Id": "svc-token-123" },
+      }),
+      authedEnv
+    );
+    expect(validCfAccessRes.status).toBe(200);
+  });
 });

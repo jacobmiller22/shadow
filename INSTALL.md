@@ -1,223 +1,90 @@
-# Shadow Install Instructions
+# Installing & Configuring Shadow (v2.0)
 
-To install shadow, follow the instructions below to configure the tool dependencies, set up your backlog repository, and integrate the protocol with your agentic tools.
+Shadow is an ultra-low latency ($< 20\text{ms}$), local-first issue engine and Cloudflare Edge sync ecosystem for autonomous AI coding agents and human developers.
 
-## Prerequisites
+---
 
-Ensure the following tools are installed:
+## 1. Quick Installation
 
-- **GitHub CLI (`gh`)**: Used to execute task repository bindings.
-- **jq**: Command-line JSON processor.
-
+### Option A: One-Line Curl Installer (Recommended)
 ```bash
-# Install dependencies via Homebrew (macOS)
-brew install gh jq
+curl -fsSL https://raw.githubusercontent.com/jacobmiller22/shadow/main/install.sh | bash
+```
+Installs the pre-compiled standalone binary to `~/.local/bin/shadow`.
+
+### Option B: Homebrew Tap (macOS & Linux)
+```bash
+brew tap jacobmiller22/shadow
+brew install shadow
 ```
 
-Verify your GitHub CLI login status:
+### Option C: Build from Source with Bun
+Prerequisites: [Bun](https://bun.sh) 1.2+
 ```bash
-gh auth status
-```
-If not logged in, authenticate via:
-```bash
-gh auth login
+git clone https://github.com/jacobmiller22/shadow.git
+cd shadow
+bun install
+bun run build:cli
+# Binary compiled to bin/shadow
+cp bin/shadow ~/.local/bin/
 ```
 
 ---
 
-## Step 1: Create & Clone your Backlog Repository
+## 2. Agent Skill Installation
 
-1. Create a private repository on GitHub to track your tasks (e.g., `shadowtracker`):
-   ```bash
-   gh repo create shadowtracker --private --add-readme
-   ```
-2. Clone this repository to a local directory of your choice on your machine:
-   ```bash
-   git clone git@github.com:jacobmiller22/shadowtracker.git ~/projects/shadowtracker
-   ```
-   *(Note down the exact directory where you cloned this repository, as you will need it in Step 2).*
+Shadow provides a universal Agent Skill protocol specification compatible with Google Antigravity, Claude Code, and Cursor.
 
----
-## Step 2: Run the Automated Install Script
-
-To automatically configure the directories, copy configuration files, and install the Antigravity global skill, run the installation script from the root of the shadow workspace:
-
+Run the automated multi-agent installer script:
 ```bash
-./install.sh
+./scripts/install_skill.sh
 ```
-
-This script will:
-1. Verify prerequisites (`gh`, `jq`) and check your GitHub CLI authentication.
-2. Create configuration, queue, and dedicated scratch directories: `~/.config/shadow`, `~/.config/shadow/queue`, and `~/.local/share/shadow`.
-3. Initialize the config file `~/.config/shadow/config.json` and create `~/.config/shadow/error.log` for validation recovery logging.
-4. Perform an automatic TTL cleanup to prune any stale local scratch drafts older than 24 hours.
-5. Install the Antigravity global skill by copying `skills/shadow/SKILL.md` to `~/.gemini/config/skills/shadow/SKILL.md`.
-6. Configure the global `~/.gemini/GEMINI.md` guidelines automatically to ensure the shadow skill is loaded and executed proactively on every session startup.
-
-Once completed, open `~/.config/shadow/config.json` and configure:
-- **`target_repo`**: The exact SSH or HTTPS URL of your backlog repository (e.g., `git@github.com:your-username/your-shadow-backlog-repo.git`).
-- **`local_backlog_path`**: The absolute path to the local directory where you cloned the backlog repository in Step 1 (e.g., `/Users/your-username/projects/shadowtracker`).
-- **`custom_labels`** (Optional): A mapping of standard shadow labels (e.g. `type:jira-shadow`, `type:ad-hoc`, etc.) to custom ones configured on your GitHub project board.
-
-Here is a template of `~/.config/shadow/config.json`:
-```json
-{
-  "agent_identity": "shadow-task-tracker",
-  "target_repo": "git@github.com:your-username/your-shadow-backlog-repo.git",
-  "local_backlog_path": "/Users/your-username/projects/shadowtracker",
-  "custom_labels": {
-    "type:jira-shadow": "story",
-    "type:ad-hoc": "chore",
-    "type:personal-dev": "upskill",
-    "type:blocker": "blocked"
-  },
-  "bindings": {
-    "create_issue": "gh issue create --title \"{{title}}\" --body \"{{body}}\" --label \"{{labels}}\"",
-    "search_issue": "gh issue list --search \"{{query}}\" --json number,title,labels",
-    "update_issue": "gh issue comment {{issue_id}} --body \"{{body}}\"",
-    "close_issue": "gh issue close {{issue_id}} --comment \"{{comment}}\"",
-    "reopen_issue": "gh issue reopen {{issue_id}}",
-    "list_issues": "gh issue list --state open --json number,title,labels",
-    "view_issue": "gh issue view {{issue_id}} --json title,body,comments",
-    "add_label": "gh issue edit {{issue_id}} --add-label \"{{label}}\"",
-    "remove_label": "gh issue edit {{issue_id}} --remove-label \"{{label}}\""
-  }
-}
-```
+This automatically links `skills/shadow/SKILL.md` to:
+- **Google Antigravity:** `~/.gemini/antigravity/skills/shadow`
+- **Claude Code:** `~/.claude/skills/shadow`
+- **Cursor IDE:** `~/.cursor/skills/shadow`
 
 ---
 
-## Step 3: Install the /shadow Skill
+## 3. Shell Autocompletions
 
-The `/shadow` task-tracking skill is defined in `skills/shadow/SKILL.md` inside this repository. You can install it for different agent environments:
+Generate native autocompletion scripts for your shell:
 
-### A. Claude Code (CLI)
-To install the skill in Claude Code, run the plugin command pointing to either the local directory or the remote repository:
-
+### Zsh
 ```bash
-# Option 1: Install from the local repository directory
-/plugin add --path ./skills/shadow
-
-# Option 2: Install directly from the GitHub repository URL
-/plugin add https://github.com/jacobmiller22/shadow/tree/main/skills/shadow
+shadow completion zsh > ~/.zsh/completion/_shadow
 ```
-
-Once installed, Claude Code will automatically detect context-switching triggers or allow manual execution using the `/shadow` slash command.
-
-### B. Antigravity
-To enable intelligent, proactive execution in Antigravity (Google's agent-first platform), the agent must be globally instructed to check and run the shadow skill at the start of every session.
-
-1. **Install the Skill**:
-   The skill file is automatically copied to `~/.gemini/config/skills/shadow/SKILL.md` by the `install.sh` script. If you need to copy it manually:
-   ```bash
-   mkdir -p ~/.gemini/config/skills/shadow
-   cp skills/shadow/SKILL.md ~/.gemini/config/skills/shadow/SKILL.md
-   ```
-
-2. **Configure Global Instructions**:
-   Since Antigravity does not automatically execute skills unless instructed, you must add startup rules to your global `~/.gemini/GEMINI.md` file. Append the following block to your `~/.gemini/GEMINI.md` (or create it if it does not exist):
-   ```markdown
-   # Antigravity Global Guidelines
-
-   ## Task Tracking Protocol (shadow)
-   You are equipped to help the user manage intense context switching by maintaining a private task repository.
-
-   ### Startup Instruction
-   At the start of every conversation, task, or user request, you MUST:
-   1. Load and read the global `shadow` skill at `~/.gemini/config/skills/shadow/SKILL.md` using the `view_file` tool.
-   2. Initialize and synchronize the task state silently and asynchronously in the background.
-
-   ### Operational Lifecycle
-   - At the start, periodically between, and at the end of completing tasks, you must:
-     - Always leverage a relevant subagent to document with "shadow".
-     - Make sure the relevant issue is created/updated at every stage.
-     - Updates via shadow should not request permission or confirmation from the user, and should always run async in the background.
-
-   ### Config & Project Context Awareness
-   - Locate and read the configuration file at `~/.config/shadow/config.json` to load the target repository and bindings.
-   - For tasks under a project, read its directory at `projects/<project_name>/` in the backlog repository (defined by `local_backlog_path`). Parse `projects/<project_name>/README.md`'s YAML frontmatter to get the local directory (`local_path`) and documentation references (`docs_url`).
-   - Execute task management operations (creating, searching, commenting, closing, reopening, listing, viewing, and labeling issues) by resolving the configured bindings.
-
-   ### Proactive Shadowing
-   - You do not need explicit permission to track tasks. If the user announces a pivot, a blocking issue, or an ad-hoc request, silently verify if a tracking issue exists. If not, create one.
-   - When a task is completed or paused, append a brief comment to the issue listing the latest state, files edited, and shell commands that were successful.
-   - Automatically close issues when tasks are completed, reopen them when resumed, or update labels.
-
-   ### Format Enforcement
-   - Always apply the metadata block and standard type labels outlined in the `SKILL.md` skill definition.
-   ```
-
-### C. Fallback: Global `CLAUDE.md` (For other compatible agents)
-If your environment does not support folder-based skill packages, you can enable global task-tracking protocol support by appending it to your global `~/.claude/CLAUDE.md` file:
-
-1. Ensure the global config directory exists:
-   ```bash
-   mkdir -p ~/.claude
-   ```
-2. Append the following protocol to `~/.claude/CLAUDE.md`:
-
-```markdown
-### Task Tracking Protocol (shadow)
-You are equipped to help the user manage intense context switching by maintaining a private task repository.
-
-1. **Operational Lifecycle**:
-   - At the start, periodically between, and at the end of completing tasks, you must:
-     - Always leverage a relevant subagent to document with "shadow".
-     - Make sure the relevant issue is created/updated at every stage.
-     - Updates via shadow should not request permission or confirmation from the user, and should always run async in the background with agents.
-
-2. **Config & Project Context Awareness**:
-   - Locate and read the configuration file at `~/.config/shadow/config.json` to load the target repository and bindings.
-   - For tasks under a project, read its directory at `projects/<project_name>/` in the backlog repository (defined by `local_backlog_path`). Parse `projects/<project_name>/README.md`'s YAML frontmatter to get the local directory (`local_path`) and documentation references (`docs_url`).
-   - Execute task management operations (creating, searching, commenting, closing, reopening, listing, viewing, and labeling issues) by resolving the configured bindings.
-
-3. **Proactive Shadowing**:
-   - You do not need explicit permission to track tasks. If the user announces a pivot, a blocking issue, or an ad-hoc request, silently verify if a tracking issue exists. If not, create one.
-   - When a task is completed or paused, append a brief comment to the issue listing the latest state, files edited, and shell commands that were successful.
-   - Automatically close issues when tasks are completed, reopen them when resumed, or update labels.
-
-4. **Format & Commenting Enforcement**:
-   - Always apply the strict issue body layout (Description, Scope & Checklist, References, Technical Context).
-   - Actively search context and outputs to extract and sanitize multiple reference links (Jira, GitHub, CI, Docs).
-   - Resolve standard labels using `"custom_labels"` mapping in `~/.config/shadow/config.json`.
-   - Check for existing open/closed issues using `search_issue` to avoid duplicates.
-   - Append intermediate progress logs as comments rather than modifying the main description.
-   - Concurrency Scratch Drafting: Draft payloads to `scratch_<timestamp>_<task_slug>.md` files in `~/.local/share/shadow/` and delete after push.
-   - Git Reconciliation: Run `git pull --rebase` inside the backlog repository before commits/pushes to prevent locks/conflicts.
-   - Offline Local Cache: Move scratch files from `~/.local/share/shadow/` to `~/.config/shadow/queue/` on network/API failure and sync in FIFO order when connectivity returns.
-   - Dual-Verification Closure: Never close tasks on build/test failures. Require checklist completion, green tests, and runtime verification.
-   - Recovery Fallbacks: If `config.json` is missing or corrupt, fallback to vanilla CLI execution and standard labels, logging warnings to `error.log`.
+### Bash
+```bash
+shadow completion bash > /etc/bash_completion.d/shadow
 ```
-
+### Fish
+```bash
+shadow completion fish > ~/.config/fish/completions/shadow.fish
+```
 
 ---
 
-## 4. Configuration for Other Tools
+## 4. Git Hook Automation
 
-### A. Claude Desktop (GitHub MCP Server)
-If you use **Claude Desktop** and want to interact with your shadow task repository directly via UI/chat integration rather than executing command-line bindings, you can configure the official GitHub MCP server.
-
-Add the following block to your `claude_desktop_config.json` (located at `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
-
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "<your-personal-access-token-with-repo-scope>"
-      }
-    }
-  }
-}
+Install non-blocking post-commit and pre-push hooks:
+```bash
+shadow hook install
 ```
+- **`post-commit`:** Stamps commit SHAs into the currently active task's audit trail.
+- **`pre-push`:** Spawns asynchronous background sync (`shadow sync --quiet &`).
 
-### B. Command-line Auth Options
-Ensure that whatever tool shell executes your bindings can authenticate with GitHub. 
+---
 
-- **Standard Interactive Setup**: Run `gh auth login` and complete the browser flow.
-- **Non-interactive / Daemon Setup**: Set the environment variable in your shell profile (`~/.zshrc` or `~/.bashrc`):
-  ```bash
-  export GITHUB_TOKEN="<your-personal-access-token>"
-  ```
+## 5. Cloudflare Edge Sync Pairing
+
+To connect your local CLI to a corporate Jira instance via the Cloudflare Edge Bridge:
+```bash
+# Pair device
+shadow sync
+```
+Or configure environment variables in `~/.config/shadow/config.env`:
+```bash
+SHADOW_EDGE_URL="https://edge.shadow.dev"
+SHADOW_WEB_TOKEN="<your-shared-secret>"
+```

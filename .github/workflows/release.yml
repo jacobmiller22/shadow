@@ -1,0 +1,69 @@
+name: Release & Binary Distribution
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-binaries:
+    name: Build Standalone Binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            binary_name: shadow-darwin-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            binary_name: shadow-darwin-x64
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            binary_name: shadow-linux-x64
+          - os: ubuntu-24.04-arm
+            target: bun-linux-arm64
+            binary_name: shadow-linux-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compile Standalone Executable
+        run: |
+          mkdir -p release
+          bun build --compile --minify packages/cli/src/index.ts --target=${{ matrix.target }} --outfile release/${{ matrix.binary_name }}
+          cd release && sha256sum ${{ matrix.binary_name }} > ${{ matrix.binary_name }}.sha256
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary_name }}
+          path: release/*
+
+  publish-release:
+    name: Create GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
