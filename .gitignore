@@ -8,4 +8,5 @@ dist/
 bin/shadow
 *.bun-build
 .*.bun-build
+.cursor/
 .DS_Store

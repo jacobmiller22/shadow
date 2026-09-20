@@ -66,6 +66,31 @@ export class MigrationsEngine {
 
       CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON sync_queue(status);
 
+      -- Idempotency tokens table (SHD-SKILL-003)
+      CREATE TABLE IF NOT EXISTS idempotency_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        token TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_idempotency_token ON idempotency_tokens(token);
+      CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_tokens(expires_at);
+
+      -- Worker claim locks table (SHD-SKILL-011)
+      CREATE TABLE IF NOT EXISTS worker_claims (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+        worker_id TEXT NOT NULL,
+        claimed_at INTEGER NOT NULL,
+        lease_seconds INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_claims_task ON worker_claims(task_id);
+      CREATE INDEX IF NOT EXISTS idx_claims_expires ON worker_claims(expires_at);
+
       -- FTS5 Full-Text Search Virtual Table
       CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
         id UNINDEXED,

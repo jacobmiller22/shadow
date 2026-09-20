@@ -6,3 +6,8 @@ export * from "./db/fts";
 export * from "./db/backup";
 export * from "./git/context";
 export * from "./services/task.service";
+export * from "./services/idempotency.service";
+export * from "./services/claim.service";
+export * from "./services/checklist.service";
+export * from "./services/verify.service";
+export * from "./services/template.service";
