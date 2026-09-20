@@ -1,145 +1,68 @@
 #!/usr/bin/env bash
-#
-# Shadow Installation & Configuration Script
-# Automates the setup of the shadow tool environment and Gemini agent skills.
-#
+set -e
 
-set -euo pipefail
+# Shadow Single-Command Installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/jacobmiller22/shadow/main/install.sh | bash
 
-# Color helper functions
-info() { echo -e "\033[1;34m[INFO]\033[0m $*"; }
-success() { echo -e "\033[1;32m[SUCCESS]\033[0m $*"; }
-error() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; }
-warn() { echo -e "\033[1;33m[WARNING]\033[0m $*"; }
+REPO="jacobmiller22/shadow"
+INSTALL_DIR="${SHADOW_INSTALL_DIR:-$HOME/.local/bin}"
 
-echo "==========================================="
-echo "      Installing Shadow Task Tracker       "
-echo "==========================================="
+echo "⚡ Installing Shadow CLI..."
 
-# 1. Prerequisite Checks
-info "Checking prerequisites..."
+OS="$(uname -s)"
+ARCH="$(uname -m)"
 
-if ! command -v gh &> /dev/null; then
-    error "GitHub CLI ('gh') is not installed. Please run 'brew install gh' first."
-    exit 1
-fi
-
-if ! command -v jq &> /dev/null; then
-    error "jq is not installed. Please run 'brew install jq' first."
-    exit 1
-fi
-
-success "Prerequisites (gh, jq) are installed."
-
-# 2. GitHub Auth Check
-info "Verifying GitHub CLI authentication status..."
-if ! gh auth status &> /dev/null; then
-    warn "You are not logged into GitHub CLI."
-    warn "Please authenticate by running 'gh auth login' or ensure GITHUB_TOKEN is set."
-    warn "Continuing installation, but bindings may fail until authenticated."
-else
-    success "GitHub CLI is authenticated."
-fi
-
-# 3. Create Configuration, Queue, and Scratch Directories
-CONFIG_DIR="$HOME/.config/shadow"
-SCRATCH_DIR="$HOME/.local/share/shadow"
-QUEUE_DIR="$CONFIG_DIR/queue"
-ERROR_LOG="$CONFIG_DIR/error.log"
-
-info "Creating configuration, queue, and scratch directories..."
-mkdir -p "$CONFIG_DIR"
-mkdir -p "$SCRATCH_DIR"
-mkdir -p "$QUEUE_DIR"
-touch "$ERROR_LOG"
-success "Directories created: $CONFIG_DIR, $QUEUE_DIR, and $SCRATCH_DIR"
-
-# Prune scratch files older than 24 hours (TTL Cleanup)
-info "Cleaning up stale scratch drafts older than 24 hours..."
-if [ -d "$SCRATCH_DIR" ]; then
-    find "$SCRATCH_DIR" -name "scratch_*" -mtime +1 -delete 2>/dev/null || true
-fi
-success "Stale drafts pruned."
-
-# 4. Copy and Initialize Config File
-CONFIG_FILE="$CONFIG_DIR/config.json"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXAMPLE_CONFIG="$SCRIPT_DIR/example.config.json"
-
-if [ ! -f "$CONFIG_FILE" ]; then
-    info "No existing config.json found at $CONFIG_FILE. Initializing from template..."
-    if [ -f "$EXAMPLE_CONFIG" ]; then
-        cp "$EXAMPLE_CONFIG" "$CONFIG_FILE"
-        success "Initialized configuration at $CONFIG_FILE"
-        info "Please open $CONFIG_FILE and set your 'target_repo' and 'local_backlog_path'."
+case "$OS" in
+  Darwin)
+    if [ "$ARCH" = "arm64" ]; then
+      TARGET="shadow-darwin-arm64"
     else
-        error "Template config not found at $EXAMPLE_CONFIG!"
-        exit 1
+      TARGET="shadow-darwin-x64"
     fi
-else
-    info "Found existing config.json at $CONFIG_FILE. Leaving it intact."
-fi
-
-# 5. Install Antigravity Skill Globally
-ANTIGRAVITY_SKILL_DIR="$HOME/.gemini/config/skills/shadow"
-SKILL_SOURCE="$SCRIPT_DIR/skills/shadow/SKILL.md"
-
-info "Installing Antigravity global skill..."
-mkdir -p "$ANTIGRAVITY_SKILL_DIR"
-
-if [ -f "$SKILL_SOURCE" ]; then
-    cp "$SKILL_SOURCE" "$ANTIGRAVITY_SKILL_DIR/SKILL.md"
-    success "Antigravity skill copied to $ANTIGRAVITY_SKILL_DIR/SKILL.md"
-else
-    error "Skill source file not found at $SKILL_SOURCE!"
+    ;;
+  Linux)
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+      TARGET="shadow-linux-arm64"
+    else
+      TARGET="shadow-linux-x64"
+    fi
+    ;;
+  *)
+    echo "❌ Unsupported operating system: $OS"
     exit 1
+    ;;
+esac
+
+mkdir -p "$INSTALL_DIR"
+
+# Download latest release binary
+DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$TARGET"
+echo "⬇️  Downloading $TARGET..."
+
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/shadow" || true
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO "$INSTALL_DIR/shadow" "$DOWNLOAD_URL" || true
 fi
 
-# 6. Configure Antigravity Global Guidelines
-GEMINI_MD="$HOME/.gemini/GEMINI.md"
-info "Configuring Antigravity global guidelines..."
-mkdir -p "$HOME/.gemini"
-if [ ! -f "$GEMINI_MD" ]; then
-    cat << 'EOF' > "$GEMINI_MD"
-# Antigravity Global Guidelines
-
-EOF
+# Fallback: if downloading latest release fails (e.g. repo is private or pre-release), compile via local Bun if available
+if [ ! -f "$INSTALL_DIR/shadow" ] || [ ! -s "$INSTALL_DIR/shadow" ]; then
+  if command -v bun >/dev/null 2>&1 && [ -f "./packages/cli/src/index.ts" ]; then
+    echo "ℹ️  Building local standalone binary via Bun..."
+    bun build --compile --minify packages/cli/src/index.ts --outfile "$INSTALL_DIR/shadow"
+  else
+    echo "⚠️ Could not download pre-built binary and Bun is not available."
+    exit 1
+  fi
 fi
 
-if ! grep -q "Task Tracking Protocol (shadow)" "$GEMINI_MD" 2>/dev/null; then
-    cat << 'EOF' >> "$GEMINI_MD"
+chmod +x "$INSTALL_DIR/shadow"
 
-## Task Tracking Protocol (shadow)
-You are equipped to help the user manage intense context switching by maintaining a private task repository.
-
-### Operational Lifecycle
-The shadow skill should be loaded at the start and end of every conversation, and during conversations when it appears that an item of work or as soon as meaningful progress has been made, repeating until the conversation is closed.
-At these points, you must:
-1. Load and read the global `shadow` skill at `~/.gemini/config/skills/shadow/SKILL.md` using the `view_file` tool.
-2. Silently initialize, synchronize, and update task states asynchronously in the background (using a relevant subagent to document with "shadow") without requesting user permission or confirmation, ensuring that the metadata frontmatter `status` in the issue body is actively updated to `In Progress` during iterations and resumptions.
-
-### Config & Project Context Awareness
-- Locate and read the configuration file at `~/.config/shadow/config.json` to load the target repository and bindings.
-- For tasks under a project, read its directory at `projects/<project_name>/` in the backlog repository (defined by `local_backlog_path`). Parse `projects/<project_name>/README.md`'s YAML frontmatter to get the local directory (`local_path`) and documentation references (`docs_url`).
-- Execute task management operations (creating, searching, commenting, closing, reopening, listing, viewing, and labeling issues) by resolving the configured bindings.
-
-### Proactive Shadowing
-- You do not need explicit permission to track tasks. If the user announces a pivot, a blocking issue, or an ad-hoc request, silently verify if a tracking issue exists. If not, create one.
-- When a task is completed or paused, append a brief comment to the issue listing the latest state, files edited, and shell commands that were successful.
-- Automatically close issues when tasks are completed, reopen them when resumed, or update labels.
-
-### Format Enforcement
-- Always apply the metadata block and standard type labels outlined in the `SKILL.md` skill definition.
-EOF
-    success "Appended Shadow Task Tracking Protocol to $GEMINI_MD"
-else
-    info "Shadow Task Tracking Protocol already configured in $GEMINI_MD"
-fi
-
-echo "==========================================="
-success "Shadow installation completed successfully!"
-echo "==========================================="
-info "Next Steps:"
-echo "  1. Verify/update your config at: $CONFIG_FILE"
-echo "  2. Ensure your backlog repo is cloned at the 'local_backlog_path' value."
-echo "  3. Start using shadow asynchronously in your agent workflow!"
+echo "✅ Successfully installed shadow to $INSTALL_DIR/shadow"
+echo ""
+echo "Make sure $INSTALL_DIR is in your PATH:"
+echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+echo ""
+echo "Verify installation:"
+echo "  shadow --help"
+EOF && chmod +x install.sh
